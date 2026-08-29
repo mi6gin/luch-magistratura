@@ -1,0 +1,19 @@
+#!/usr/bin/env php
+<?php
+
+use Illuminate\Foundation\Application;
+use Symfony\Component\Console\Input\ArgvInput;
+
+define('LARAVEL_START', microtime(true));
+
+// Keep navigation responsive while the ML process is running.
+if (PHP_OS_FAMILY !== 'Windows' && getenv('PHP_CLI_SERVER_WORKERS') === false) {
+    putenv('PHP_CLI_SERVER_WORKERS=4');
+}
+
+require __DIR__.'/vendor/autoload.php';
+
+$app = require_once __DIR__.'/bootstrap/app.php';
+
+$status = $app->handleCommand(new ArgvInput());
+exit($status);
