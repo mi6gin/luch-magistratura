@@ -13,4 +13,4 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --break-system-packages --no-cache-dir -r /tmp/requirements.txt
 
 EXPOSE 8000
-CMD ["sh", "-c", "composer install --no-interaction --prefer-dist && php artisan serve --host=0.0.0.0 --port=8000"]
+CMD ["sh", "-c", "composer install --no-interaction --prefer-dist && php artisan rayventory:setup && php artisan serve --host=0.0.0.0 --port=8000"]

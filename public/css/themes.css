@@ -12,3 +12,4 @@
 [data-theme="light"] .global-loader { background: rgba(244, 248, 252, .82); }
 [data-theme="light"] .metric-top, [data-theme="light"] .panel-kicker, [data-theme="light"] .data-table th { color: var(--muted); }
 [data-theme="light"] .avatar { background: linear-gradient(135deg, #f3c27d, #d65a2d); }
+[data-theme="light"] .report-card.is-primary { background: radial-gradient(circle at 92% 8%, rgba(201, 79, 40, .13), transparent 38%), linear-gradient(135deg, #fff, #edf4fa); }

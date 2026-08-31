@@ -2,7 +2,11 @@
 
 return [
     'python' => env('ML_PYTHON', 'py'),
-    'engine_path' => env('ML_ENGINE_PATH', base_path('../MAGA/engine/predict_cli.py')),
-    'reports_path' => env('ML_REPORTS_PATH', base_path('../MAGA/reports')),
+    'engine_path' => env('ML_ENGINE_PATH', base_path('ml/predict_cli.py')),
+    'database_path' => env(
+        'ML_DB_PATH',
+        env('DB_DATABASE', storage_path('app/rayventory/inventory_forecast.db')),
+    ),
+    'reports_path' => env('ML_REPORTS_PATH', storage_path('app/reports')),
     'timeout' => env('ML_TIMEOUT', 120),
 ];

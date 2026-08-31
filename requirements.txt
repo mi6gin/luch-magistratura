@@ -1,8 +1,5 @@
 numpy
 pandas
-joblib
-scikit-learn
-statsmodels
 matplotlib
 reportlab
-torch
+python-pptx

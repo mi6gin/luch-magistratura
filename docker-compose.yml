@@ -7,9 +7,5 @@ services:
       - .env
     volumes:
       - .:/var/www/html
-      - ../MAGA:/var/www/MAGA:ro
     environment:
       ML_PYTHON: python3
-      DB_DATABASE: /var/www/MAGA/data/inventory_forecast.db
-      ML_ENGINE_PATH: /var/www/MAGA/engine/predict_cli.py
-      ML_REPORTS_PATH: /var/www/MAGA/reports

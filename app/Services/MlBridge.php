@@ -2,6 +2,11 @@
 
 namespace App\Services;
 
+use JsonException;
+use RuntimeException;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\Process;
+use Throwable;
 
 class MlBridge
 {
@@ -17,32 +22,24 @@ class MlBridge
     {
         $directory = storage_path('app/ml-jobs');
         $statePath = $directory.DIRECTORY_SEPARATOR.$jobId.'.json';
-        if (!is_file($statePath)) {
+        if (! is_file($statePath)) {
             return ['status' => 'not_found'];
         }
 
-        $state = json_decode((string) file_get_contents($statePath), true) ?: [];
-        if (($state['status'] ?? null) !== 'processing' || !is_file($state['done'])) {
-            return $state;
+        $state = json_decode((string) file_get_contents($statePath), true);
+        if (! is_array($state)) {
+            return [
+                'status' => 'failed',
+                'result' => ['error' => 'Invalid job state'],
+            ];
         }
 
-        $output = is_file($state['output']) ? (string) file_get_contents($state['output']) : '';
-        $lines = array_reverse(preg_split('/\R/', trim($output)) ?: []);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (str_starts_with($line, '{')) {
-                $result = json_decode($line, true);
-                $state['status'] = isset($result['error']) ? 'failed' : 'completed';
-                $state['result'] = $result;
-                file_put_contents($statePath, json_encode($state, JSON_UNESCAPED_UNICODE));
-                return $state;
-            }
+        $response = ['status' => $state['status'] ?? 'failed'];
+        if (isset($state['result']) && is_array($state['result'])) {
+            $response['result'] = $state['result'];
         }
 
-        $state['status'] = 'failed';
-        $state['result'] = ['error' => 'Invalid output format from ML engine'];
-        file_put_contents($statePath, json_encode($state, JSON_UNESCAPED_UNICODE));
-        return $state;
+        return $response;
     }
 
     public function simulate(int $productId = 1, array $overrides = []): array
@@ -53,46 +50,34 @@ class MlBridge
         ]);
     }
 
-    public function generateReport(string $type = 'standard'): array
+    public function generateReport(string $type = 'standard', array $formats = ['pdf', 'pptx']): array
     {
-        return $this->run('report', ['type' => $type]);
+        return $this->run('report', [
+            'type' => $type,
+            'formats' => $formats,
+        ]);
     }
 
     private function startJob(string $action, array $payload): array
     {
         $directory = storage_path('app/ml-jobs');
-        if (!is_dir($directory)) {
+        if (! is_dir($directory)) {
             mkdir($directory, 0775, true);
         }
 
         $jobId = bin2hex(random_bytes(12));
-        $output = $directory.DIRECTORY_SEPARATOR.$jobId.'.out';
-        $done = $directory.DIRECTORY_SEPARATOR.$jobId.'.done';
         $statePath = $directory.DIRECTORY_SEPARATOR.$jobId.'.json';
-        $python = (string) config('rayventory.python', 'py');
-        $script = (string) config('rayventory.engine_path');
-        $json = json_encode($payload, JSON_THROW_ON_ERROR);
-        $command = implode(' ', array_map('escapeshellarg', [$python, $script, $action, '--payload', $json]));
+        file_put_contents($statePath, json_encode(['status' => 'processing'], JSON_UNESCAPED_UNICODE));
 
-        $state = ['status' => 'processing', 'output' => $output, 'done' => $done];
-        file_put_contents($statePath, json_encode($state, JSON_UNESCAPED_UNICODE));
+        $result = $this->run($action, $payload);
+        $failed = array_key_exists('error', $result) || ($result['success'] ?? true) === false;
+        $status = $failed ? 'failed' : 'completed';
+        file_put_contents($statePath, json_encode([
+            'status' => $status,
+            'result' => $result,
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
 
-        if (PHP_OS_FAMILY === 'Windows') {
-            $batch = $directory.DIRECTORY_SEPARATOR.$jobId.'.bat';
-            $batchBody = '@echo off'.PHP_EOL.$command.' > "'.$output.'" 2>&1'.PHP_EOL.'echo done>"'.$done.'"';
-            file_put_contents($batch, $batchBody);
-            pclose(popen('start "" /B cmd /D /C "'.$batch.'"', 'r'));
-        } else {
-            $process = new \Symfony\Component\Process\Process($command, base_path(), null, null, null);
-            $process->start(function ($type, $buffer) use ($output, $done): void {
-                file_put_contents($output, $buffer, FILE_APPEND);
-                if ($type === \Symfony\Component\Process\Process::ERR) {
-                    file_put_contents($done, 'done');
-                }
-            });
-        }
-
-        return ['job_id' => $jobId, 'status' => 'processing'];
+        return ['job_id' => $jobId, 'status' => $status];
     }
 
     private function run(string $action, array $payload): array
@@ -101,25 +86,63 @@ class MlBridge
             (string) config('rayventory.python', 'py'),
             (string) config('rayventory.engine_path'),
             $action,
-            '--payload',
-            json_encode($payload, JSON_THROW_ON_ERROR),
+            '--payload-b64',
+            base64_encode(json_encode($payload, JSON_THROW_ON_ERROR)),
         ];
-        $command = implode(' ', array_map('escapeshellarg', $arguments));
 
-        $output = shell_exec($command.' 2>&1');
-        if (!$output) {
-            report(new \RuntimeException('ML engine returned no output'));
+        $process = new Process($arguments, base_path(), [
+            'ML_DB_PATH' => (string) config('rayventory.database_path'),
+            'ML_REPORTS_PATH' => (string) config('rayventory.reports_path'),
+        ]);
+        $process->setTimeout((float) config('rayventory.timeout', 120));
+        try {
+            $process->run();
+        } catch (ProcessTimedOutException $exception) {
+            report($exception);
+
+            return ['error' => 'ML engine timed out'];
+        } catch (Throwable $exception) {
+            report($exception);
+
             return ['error' => 'ML engine failed'];
         }
 
-        $lines = array_reverse(preg_split('/\R/', trim($output)) ?: []);
+        $result = $this->lastJsonLine($process->getOutput())
+            ?? $this->lastJsonLine($process->getErrorOutput());
+        if (! $process->isSuccessful()) {
+            report(new RuntimeException('ML engine exited with code '.($process->getExitCode() ?? 'unknown')));
+
+            return [
+                'error' => is_string($result['error'] ?? null) && $result['error'] !== ''
+                    ? $result['error']
+                    : 'ML engine failed',
+            ];
+        }
+
+        if ($result === null) {
+            report(new RuntimeException('ML engine returned invalid output'));
+
+            return ['error' => 'Invalid output format from ML engine'];
+        }
+
+        return $result;
+    }
+
+    private function lastJsonLine(string $output): ?array
+    {
+        // Split only on ASCII newlines so PCRE cannot cut through UTF-8 Cyrillic bytes.
+        $lines = array_reverse(preg_split('/\r\n|\r|\n/', trim($output)) ?: []);
         foreach ($lines as $line) {
-            $line = trim($line);
-            if (str_starts_with($line, '{')) {
-                return json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+            try {
+                $decoded = json_decode(trim($line), true, 512, JSON_THROW_ON_ERROR);
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+            } catch (JsonException) {
+                continue;
             }
         }
 
-        return ['error' => 'Invalid output format from ML engine'];
+        return null;
     }
 }

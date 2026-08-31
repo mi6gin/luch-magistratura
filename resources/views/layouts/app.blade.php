@@ -32,7 +32,7 @@
 <div id="command-palette" class="command-overlay" aria-hidden="true">
     <div class="command-palette" role="dialog" aria-modal="true" aria-label="Командная палитра">
         <div class="command-search"><span>⌕</span><input id="command-search" type="search" placeholder="Куда перейти или что сделать?"><kbd>ESC</kbd></div>
-        <div class="command-group"><span>Навигация</span><button data-command="/"><i>◈</i><b>Обзор</b><small>Главная аналитика</small><em>01</em></button><button data-command="/inventory"><i>▤</i><b>Склад</b><small>Остатки и доступность</small><em>02</em></button><button data-command="/simulator"><i>⌁</i><b>Симулятор</b><small>Сценарии прогноза</small><em>03</em></button><button data-command="/reports"><i>▧</i><b>Отчёты</b><small>PDF-документы</small><em>04</em></button><button data-command="/knowledge"><i>?</i><b>База знаний</b><small>Методология Ray OS</small><em>05</em></button></div>
+        <div class="command-group"><span>Навигация</span><button data-command="/"><i>◈</i><b>Обзор</b><small>Главная аналитика</small><em>01</em></button><button data-command="/inventory"><i>▤</i><b>Склад</b><small>Остатки и доступность</small><em>02</em></button><button data-command="/simulator"><i>⌁</i><b>Симулятор</b><small>Сценарии прогноза</small><em>03</em></button><button data-command="/reports"><i>▧</i><b>Отчёты</b><small>PDF + презентации</small><em>04</em></button><button data-command="/knowledge"><i>?</i><b>База знаний</b><small>Методология Ray OS</small><em>05</em></button></div>
         <div class="command-hint"><span>↑↓ выбрать</span><span>↵ открыть</span><span>Esc закрыть</span></div>
     </div>
 </div>

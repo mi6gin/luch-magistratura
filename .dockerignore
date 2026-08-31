@@ -1,4 +1,9 @@
 vendor
+.git
+.idea
 .env
+ml/__pycache__
+storage/app/rayventory
+storage/app/reports
 storage/logs
 storage/framework

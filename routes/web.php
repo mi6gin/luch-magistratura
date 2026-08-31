@@ -1,7 +1,7 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ApiController;
+use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'pages.dashboard')->name('dashboard');
 Route::view('/inventory', 'pages.inventory')->name('inventory');

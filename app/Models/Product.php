@@ -9,7 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Product extends Model
 {
     protected $table = 'products';
+
     public $timestamps = false;
+
     protected $guarded = [];
 
     public function warehouseStock(): HasOne
