@@ -24,7 +24,7 @@
         <div class="sidebar-bottom"><div class="system-status"><span class="pulse"></span><span>ALL SYSTEMS<br><b>OPERATIONAL</b></span></div><div class="location">KZ / ALMATY<br><span>UTC +05:00</span></div></div>
     </aside>
     <div class="app-main">
-        <header class="topbar"><button class="mobile-menu" id="mobile-menu">☰</button><div><span class="crumb">RAY OS <b>/</b> {{ $section ?? 'WORKSPACE' }}</span><h1>{{ $heading ?? 'Центр управления' }}</h1></div><div class="top-actions"><span class="live"><span class="pulse"></span> LIVE DATA</span><button class="command-trigger" id="command-trigger"><span>⌘</span><kbd>K</kbd></button><button class="theme-toggle" id="theme-toggle" aria-label="Переключить тему">☀</button><div class="avatar">RV</div></div></header>
+        <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Открыть меню">☰</button><div><span class="crumb">RAY OS <b>/</b> {{ $section ?? 'WORKSPACE' }}</span><h1>{{ $heading ?? 'Центр управления' }}</h1></div><div class="top-actions"><span class="live"><span class="pulse"></span> LIVE DATA</span><button class="command-trigger" id="command-trigger" aria-label="Открыть командную палитру"><span>⌘</span><kbd>K</kbd></button><button class="theme-toggle" id="theme-toggle" aria-label="Переключить тему">☀</button><div class="user-chip"><div class="avatar">RV</div><span>Ray Admin<small>Workspace owner</small></span></div></div></header>
         <main class="page-content page-enter">@yield('content')</main>
     </div>
 </div>

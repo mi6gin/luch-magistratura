@@ -1,0 +1,27 @@
+.app-shell { display: flex; min-height: 100vh; }
+.sidebar { position: relative; display: flex; flex: 0 0 248px; flex-direction: column; width: 248px; padding: 32px 16px 18px; overflow: hidden; background: linear-gradient(180deg, rgba(15, 23, 39, .96), rgba(9, 14, 25, .94)); border-right: 1px solid rgba(255, 255, 255, .09); }
+.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 0 12px 42px; }
+.brand-logo { display: block; width: 188px; height: 72px; object-fit: contain; object-position: left center; }
+.brand > span { padding-left: 2px; line-height: 1; }
+.brand > span b { font-family: var(--display); font-size: 13px; letter-spacing: .15em; }
+.brand small { display: block; margin-top: 7px; color: #9ba6b8; font-size: 8px; font-weight: 800; letter-spacing: .19em; }
+.nav-label { padding: 0 12px 10px; margin-bottom: 4px; }
+.nav { display: grid; gap: 5px; }
+.nav-link { display: flex; min-height: 46px; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid transparent; border-radius: 13px; color: var(--muted); }
+.nav-link i { width: 20px; color: #ff9470; font-size: 16px; font-style: normal; text-align: center; }
+.nav-link span { min-width: 0; }
+.nav-link em { margin-left: auto; color: var(--faint); font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; }
+.sidebar-bottom { margin-top: auto; padding: 17px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.system-status { display: flex; align-items: center; gap: 8px; margin-bottom: 23px; color: var(--lime); font-size: 9px; line-height: 1.3; letter-spacing: .1em; }
+.system-status b { color: var(--text); }
+.location { font-size: 9px; line-height: 1.7; letter-spacing: .14em; }
+.location span { color: var(--faint); }
+.app-main { min-width: 0; flex: 1; }
+.topbar { display: flex; height: 100px; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid rgba(145, 171, 212, .1); }
+.topbar h1 { margin: 7px 0 0; font-family: var(--display); font-size: 22px; font-weight: 650; letter-spacing: -.04em; }
+.top-actions { display: flex; align-items: center; gap: 14px; }
+.page-content { width: 100%; max-width: 1500px; padding: 42px 42px 72px; }
+.page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 35px; }
+.page-intro h2 { margin: 9px 0 10px; font-family: var(--display); font-size: clamp(28px, 3vw, 42px); line-height: 1.05; letter-spacing: -.055em; }
+.page-intro p { max-width: 560px; margin: 0; color: var(--muted); font-size: 14px; }
+.top-actions .user-chip { flex: 0 0 auto; }

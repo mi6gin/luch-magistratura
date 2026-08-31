@@ -3,7 +3,7 @@
     const saved=localStorage.getItem('rayventory-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
     root.dataset.theme=saved;
     const themeButton=document.querySelector('#theme-toggle');
-    if(themeButton){themeButton.textContent=saved==='dark'?'☀':'☾';themeButton.onclick=()=>{const next=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=next;localStorage.setItem('rayventory-theme',next);themeButton.textContent=next==='dark'?'☀':'☾';if(window.reloadChart)window.reloadChart()};}
+    if(themeButton){themeButton.textContent=saved==='dark'?'☀':'☾';themeButton.onclick=()=>{const next=root.dataset.theme==='dark'?'light':'dark';const rect=themeButton.getBoundingClientRect();root.style.setProperty('--theme-x',`${rect.left+rect.width/2}px`);root.style.setProperty('--theme-y',`${rect.top+rect.height/2}px`);const change=()=>{root.dataset.theme=next;localStorage.setItem('rayventory-theme',next);themeButton.textContent=next==='dark'?'☀':'☾';if(window.reloadChart)window.reloadChart()};if(document.startViewTransition){document.startViewTransition(change)}else{root.classList.add('theme-changing');change();setTimeout(()=>root.classList.remove('theme-changing'),1200)}};}
     const toast=(message,type='info')=>{const el=document.createElement('div');el.className='toast '+type;el.textContent=message;document.querySelector('#toast-container').appendChild(el);setTimeout(()=>el.remove(),4200)};
     const api=async(url,options={})=>{const response=await fetch('/api/'+url,{headers:{Accept:'application/json','Content-Type':'application/json'},...options});return response.json()};
     const loader=document.querySelector('#global-loader');
