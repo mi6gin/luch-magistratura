@@ -120,6 +120,7 @@
     let categoryChart;
     let forecastChart;
     let allStock = [];
+    let purchaseActions = [];
 
     function categoryGraph(categories) {
         const colors = chartStyle();
@@ -212,6 +213,99 @@
         }
     }
 
+    const purchaseRow = item => {
+        const risk = item.stockout_date
+            ? `<span class="status-pill risk">${escapeHtml(item.stockout_date)}</span>`
+            : '<span class="status-pill">нет</span>';
+        const quality = item.quality?.grade || 'low';
+        const confidence = quality === 'high' ? 'Высокая' : quality === 'medium' ? 'Средняя' : 'Низкая';
+        return `<tr data-purchase-row data-order="${item.order_quantity > 0 ? 1 : 0}" data-risk="${item.stockout_date ? 1 : 0}" data-quality="${escapeHtml(quality)}">
+            <td><b>${escapeHtml(item.sku || `SKU-${item.product_id}`)}</b><small class="table-subline">${escapeHtml(item.product_name)}</small></td>
+            <td>${Number(item.on_hand).toLocaleString('ru-RU')}</td>
+            <td>${Number(item.in_transit).toLocaleString('ru-RU')}</td>
+            <td>${Number(item.days_cover).toLocaleString('ru-RU')} дн.</td>
+            <td class="stock-value">${Number(item.order_quantity).toLocaleString('ru-RU')}</td>
+            <td>${Number(item.order_value).toLocaleString('ru-RU')} ₸</td>
+            <td>${risk}</td>
+            <td><span class="confidence ${escapeHtml(quality)}">${confidence}</span></td>
+            <td><button class="edit-link" data-explain="${item.product_id}">почему?</button></td>
+        </tr>`;
+    };
+
+    function filterPurchases() {
+        const filter = document.querySelector('#purchase-filter')?.value || 'all';
+        document.querySelectorAll('[data-purchase-row]').forEach(row => {
+            row.hidden = (filter === 'order' && row.dataset.order !== '1')
+                || (filter === 'risk' && row.dataset.risk !== '1')
+                || (filter === 'low-quality' && row.dataset.quality === 'high');
+        });
+    }
+
+    function explainPurchase(productId) {
+        const item = purchaseActions.find(action => action.product_id === productId);
+        if (!item) return;
+        document.querySelector('#explain-name').textContent = `${item.sku || ''} · ${item.product_name}`;
+        document.querySelector('#explain-content').innerHTML = `
+            <div class="explain-equation">
+                <article><small>Спрос на срок поставки</small><b>${Number(item.lead_time_demand).toLocaleString('ru-RU')}</b></article>
+                <span>−</span><article><small>Остаток</small><b>${Number(item.on_hand).toLocaleString('ru-RU')}</b></article>
+                <span>−</span><article><small>В пути</small><b>${Number(item.in_transit).toLocaleString('ru-RU')}</b></article>
+                <span>=</span><article class="result"><small>К заказу</small><b>${Number(item.order_quantity).toLocaleString('ru-RU')}</b></article>
+            </div>
+            <dl class="explain-list">
+                <div><dt>Срок поставки</dt><dd>${item.lead_time_days} дней</dd></div>
+                <div><dt>Медианный спрос</dt><dd>${Number(item.median_lead_time_demand).toLocaleString('ru-RU')}</dd></div>
+                <div><dt>Страховая поправка</dt><dd>${Number(item.safety_stock).toLocaleString('ru-RU')}</dd></div>
+                <div><dt>Лучший день заказа</dt><dd>${escapeHtml(item.best_order_date || 'заказ пока не требуется')}</dd></div>
+                <div><dt>Ожидаемый дефицит</dt><dd>${escapeHtml(item.stockout_date || 'не ожидается')}</dd></div>
+                <div><dt>Уверенность</dt><dd>${Number(item.quality?.score || 0).toLocaleString('ru-RU')} / 100</dd></div>
+            </dl>`;
+        const modal = document.querySelector('#purchase-explainer');
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+
+    async function loadPurchasePlan() {
+        const button = document.querySelector('#refresh-purchases');
+        setButtonLoading(button, true);
+        try {
+            const data = await api('purchase-plan');
+            purchaseActions = data.actions || [];
+            document.querySelector('#purchase-units').textContent = Number(data.portfolio.recommended_order_units).toLocaleString('ru-RU');
+            document.querySelector('#purchase-value').textContent = `${Number(data.portfolio.recommended_order_value).toLocaleString('ru-RU')} ₸`;
+            document.querySelector('#purchase-risk').textContent = `${data.portfolio.at_risk_skus} SKU`;
+            document.querySelector('#purchase-quality').textContent = `${data.quality.score} / 100`;
+            document.querySelector('#purchase-quality-note').textContent = data.quality.grade === 'high' ? 'высокая уверенность' : data.quality.grade === 'medium' ? 'средняя уверенность' : 'низкая уверенность';
+            document.querySelector('#purchase-data-date').textContent = `данные на ${data.data_as_of}`;
+            const evaluationAvailable = Number(data.evaluation.sku_count) > 0;
+            document.querySelector('#quality-grid').innerHTML = [
+                ['Полнота истории', `${data.quality.average_completeness_pct}%`],
+                ['Свежесть', `${data.quality.freshness_days} дн.`],
+                ['WAPE', evaluationAvailable ? `${data.evaluation.wape_pct}%` : 'н/д'],
+                ['Bias', evaluationAvailable ? `${data.evaluation.bias_pct}%` : 'н/д'],
+                ['Покрытие q10–q90', evaluationAvailable ? `${data.evaluation.coverage_pct}%` : 'н/д'],
+                ['SKU проверено', data.evaluation.sku_count],
+            ].map(([label, value]) => `<article><small>${label}</small><b>${value}</b></article>`).join('');
+            const warningBox = document.querySelector('#purchase-warnings');
+            if (data.warnings?.length) {
+                warningBox.innerHTML = `<b>Предупреждения данных</b><ul>${data.warnings.slice(0, 8).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+                warningBox.classList.remove('hidden');
+            } else warningBox.classList.add('hidden');
+            document.querySelector('#purchase-rows').innerHTML = purchaseActions.length
+                ? purchaseActions.map(purchaseRow).join('')
+                : '<tr><td colspan="9">Позиции для планирования не найдены</td></tr>';
+            document.querySelectorAll('[data-explain]').forEach(element => {
+                element.onclick = () => explainPurchase(Number(element.dataset.explain));
+            });
+            filterPurchases();
+        } catch (error) {
+            toast(error.message || 'Не удалось рассчитать закупки', 'error');
+            document.querySelector('#purchase-rows').innerHTML = '<tr><td colspan="9">Расчёт не выполнен</td></tr>';
+        } finally {
+            setButtonLoading(button, false);
+        }
+    }
+
     function renderInventory() {
         const query = (document.querySelector('#stock-search')?.value || '').toLowerCase();
         const filter = document.querySelector('#stock-filter')?.value || 'all';
@@ -263,6 +357,88 @@
         } finally {
             setButtonLoading(button, false);
             hideLoader();
+        }
+    }
+
+    let inventoryImportPreview = null;
+    async function importInventory() {
+        const input = document.querySelector('#inventory-excel');
+        const button = document.querySelector('#import-inventory');
+        const file = input?.files?.[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.xlsx')) {
+            toast('Выберите файл в формате .xlsx', 'error');
+            return;
+        }
+
+        const form = new FormData();
+        form.append('file', file);
+        setButtonLoading(button, true);
+        try {
+            const response = await fetch('/api/inventory/import/preview', {
+                method: 'POST',
+                headers: { Accept: 'application/json' },
+                body: form,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.success === false || data.error) {
+                throw new Error(apiErrorMessage(data, response.status));
+            }
+            inventoryImportPreview = { ...data.preview, fileName: file.name };
+            const preview = data.preview;
+            const counts = preview.counts || {};
+            document.querySelector('#import-period').textContent = `История: ${preview.period.start} — ${preview.period.end} · ${preview.period.days} дней · ${preview.warehouses.join(', ')}`;
+            document.querySelector('#import-preview-metrics').innerHTML = [
+                ['Товаров', counts.products],
+                ['Продаж', counts.sales],
+                ['Остатков', counts.stocks],
+                ['Поставок', counts.supplies],
+                ['Дней истории', preview.period.days],
+            ].map(([label, value]) => `<article><b>${Number(value || 0).toLocaleString('ru-RU')}</b><small>${label}</small></article>`).join('');
+            const warnings = document.querySelector('#import-warnings');
+            if (preview.warnings?.length) {
+                warnings.innerHTML = `<b>Обратите внимание</b><ul>${preview.warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+                warnings.classList.remove('hidden');
+                document.querySelector('#import-quality').textContent = 'ЕСТЬ ПРЕДУПРЕЖДЕНИЯ';
+                document.querySelector('#import-quality').classList.add('risk');
+            } else {
+                warnings.classList.add('hidden');
+                document.querySelector('#import-quality').textContent = 'ГОТОВО';
+                document.querySelector('#import-quality').classList.remove('risk');
+            }
+            document.querySelector('#import-preview').classList.remove('hidden');
+            toast('Файл проверен — просмотрите сводку и подтвердите импорт');
+        } catch (error) {
+            toast(error.message || 'Не удалось импортировать Excel', 'error');
+        } finally {
+            setButtonLoading(button, false);
+        }
+    }
+
+    async function confirmInventoryImport() {
+        if (!inventoryImportPreview?.token) return;
+        const button = document.querySelector('#confirm-inventory-import');
+        setButtonLoading(button, true);
+        try {
+            const data = await api('inventory/import/confirm', {
+                method: 'POST',
+                body: JSON.stringify({
+                    token: inventoryImportPreview.token,
+                    file_name: inventoryImportPreview.fileName,
+                }),
+            });
+            const counts = data.counts || {};
+            toast(`Импорт завершён: ${counts.products || 0} товаров, ${counts.sales || 0} продаж`);
+            inventoryImportPreview = null;
+            document.querySelector('#inventory-excel').value = '';
+            document.querySelector('#excel-file-name').textContent = 'Файл не выбран · максимум 20 МБ';
+            document.querySelector('#import-inventory').disabled = true;
+            document.querySelector('#import-preview').classList.add('hidden');
+            await loadData();
+        } catch (error) {
+            toast(error.message || 'Не удалось подтвердить импорт', 'error');
+        } finally {
+            setButtonLoading(button, false);
         }
     }
 
@@ -613,6 +789,26 @@
     document.querySelector('#stock-search')?.addEventListener('input', renderInventory);
     document.querySelector('#stock-filter')?.addEventListener('change', renderInventory);
     document.querySelector('#modal-save')?.addEventListener('click', saveStock);
+    document.querySelector('#inventory-excel')?.addEventListener('change', event => {
+        const file = event.target.files?.[0];
+        const button = document.querySelector('#import-inventory');
+        inventoryImportPreview = null;
+        document.querySelector('#import-preview')?.classList.add('hidden');
+        document.querySelector('#excel-file-name').textContent = file
+            ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} МБ`
+            : 'Файл не выбран · максимум 20 МБ';
+        if (button) button.disabled = !file;
+    });
+    document.querySelector('#import-inventory')?.addEventListener('click', importInventory);
+    document.querySelector('#confirm-inventory-import')?.addEventListener('click', confirmInventoryImport);
+    document.querySelector('#refresh-purchases')?.addEventListener('click', loadPurchasePlan);
+    document.querySelector('#purchase-filter')?.addEventListener('change', filterPurchases);
+    document.querySelector('#purchase-explainer-close')?.addEventListener('click', () => {
+        document.querySelector('#purchase-explainer')?.classList.remove('open');
+    });
+    document.querySelector('#purchase-explainer')?.addEventListener('click', event => {
+        if (event.target.id === 'purchase-explainer') event.target.classList.remove('open');
+    });
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();
     });
@@ -731,4 +927,5 @@
             resumeSimulation();
         });
     }
+    if (page === 'purchases') loadPurchasePlan();
 })();

@@ -4,14 +4,74 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\WarehouseStock;
+use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ApiController extends Controller
 {
-    public function __construct(private readonly MlBridge $ml) {}
+    public function __construct(
+        private readonly MlBridge $ml,
+        private readonly InventoryExcelService $excel,
+    ) {}
+
+    public function inventoryTemplate(Request $request): BinaryFileResponse
+    {
+        $path = tempnam(sys_get_temp_dir(), 'rayventory-template-');
+        abort_unless($path !== false, 500, 'Не удалось создать временный файл шаблона.');
+        $xlsxPath = $path.'.xlsx';
+        @unlink($path);
+        $withExample = $request->boolean('example');
+        $this->excel->createTemplate($xlsxPath, $withExample);
+
+        return response()->download(
+            $xlsxPath,
+            $withExample ? 'rayventory_filled_example.xlsx' : 'rayventory_blank_template.xlsx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        )->deleteFileAfterSend(true);
+    }
+
+    public function previewInventoryImport(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:xlsx', 'max:20480'],
+        ]);
+
+        try {
+            $preview = $this->excel->preview($request->file('file'));
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Файл проверен. Подтвердите импорт после просмотра сводки.',
+            'preview' => $preview,
+        ]);
+    }
+
+    public function confirmInventoryImport(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'token' => ['required', 'string', 'size:32'],
+            'file_name' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $counts = $this->excel->commit($data['token'], $data['file_name']);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Импорт подтверждён и завершён. Резервная копия предыдущих данных сохранена.',
+            'counts' => $counts,
+        ]);
+    }
 
     public function aiBriefing(): JsonResponse
     {
@@ -22,6 +82,11 @@ class ApiController extends Controller
             : 'Оценка основана на доступной истории и текущих остатках.';
 
         return response()->json(['briefing' => $message]);
+    }
+
+    public function purchasePlan(): JsonResponse
+    {
+        return $this->mlResponse($this->ml->planning());
     }
 
     public function dashboardStats(): JsonResponse
@@ -55,6 +120,7 @@ class ApiController extends Controller
     {
         return response()->json(Product::with('warehouseStock')->get()->map(fn ($product) => [
             'id' => (int) $product->id,
+            'sku' => $product->sku ?? null,
             'name' => $product->name,
             'category' => $product->category,
             'current_quantity' => (int) ($product->warehouseStock?->current_quantity ?? 0),

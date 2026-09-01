@@ -155,6 +155,12 @@ def load_inventory_data(
 
     products = products.copy()
     products["id"] = pd.to_numeric(products["id"], errors="raise").astype(int)
+    if "sku" not in products.columns:
+        products["sku"] = products["id"].map(lambda value: f"SKU-{int(value):04d}")
+    products["sku"] = products["sku"].fillna("").astype(str)
+    products.loc[products["sku"].str.strip() == "", "sku"] = products.loc[
+        products["sku"].str.strip() == "", "id"
+    ].map(lambda value: f"SKU-{int(value):04d}")
     if products["id"].duplicated().any():
         raise ValueError("Products table contains duplicate SKU ids.")
     products["lead_time"] = pd.to_numeric(products["lead_time"], errors="coerce").fillna(1).clip(lower=1).astype(int)
@@ -689,10 +695,31 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
 
     data = load_inventory_data()
     products = data["products"]
-    metrics = evaluate_baseline(data)
+    evaluation_warning = None
+    try:
+        metrics = evaluate_baseline(data)
+    except ValueError as exc:
+        metrics = {
+            "wape": 0.0,
+            "wape_pct": 0.0,
+            "mae": 0.0,
+            "bias": 0.0,
+            "bias_pct": 0.0,
+            "coverage": 0.0,
+            "coverage_pct": 0.0,
+            "holdout_days": 0,
+            "holdout_start": None,
+            "holdout_end": None,
+            "observations": 0,
+            "sku_count": 0,
+            "model": MODEL_NAME,
+        }
+        evaluation_warning = f"Backtesting недоступен: {exc}"
     strategy = STRATEGIES[report_type]
     actions: list[dict[str, Any]] = []
     warnings = list(data.get("warnings", []))
+    if evaluation_warning:
+        warnings.append(evaluation_warning)
 
     for product in products.itertuples(index=False):
         forecast = forecast_product(int(product.id), data, strategy=report_type)
@@ -713,6 +740,11 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
         daily_median = max(float(np.mean(forecast["q50"])), 1e-9)
         days_cover = available / daily_median
         stockout = _stockout_date(forecast, available)
+        best_order_date = None
+        if stockout:
+            best_order_date = (
+                pd.Timestamp(stockout) - pd.Timedelta(days=int(product.lead_time))
+            ).date().isoformat()
         action_label = "ЗАКАЗ" if order_quantity > 0 else "КОНТРОЛЬ"
         priority_score = order_quantity * max(_as_float(product.unit_price), 1.0)
         if stockout:
@@ -721,6 +753,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
         actions.append(
             {
                 "product_id": int(product.id),
+                "sku": str(product.sku),
                 "product_name": str(product.name),
                 "category": str(product.category),
                 "lead_time_days": int(product.lead_time),
@@ -738,6 +771,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
                 "forecast_30_q90": round(float(np.sum(forecast["q90"])), 2),
                 "days_cover": round(days_cover, 1),
                 "stockout_date": stockout,
+                "best_order_date": best_order_date,
                 "action": action_label,
                 "priority_score": round(priority_score, 2),
                 "quality": forecast["quality"],

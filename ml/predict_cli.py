@@ -11,9 +11,9 @@ import sys
 from typing import Any, Mapping, Sequence
 
 if __package__:
-    from .forecasting import MODEL_NAME, forecast_product, load_inventory_data
+    from .forecasting import MODEL_NAME, build_report_document, forecast_product, load_inventory_data
 else:
-    from forecasting import MODEL_NAME, forecast_product, load_inventory_data
+    from forecasting import MODEL_NAME, build_report_document, forecast_product, load_inventory_data
 
 
 class CliInputError(ValueError):
@@ -123,9 +123,26 @@ def run_report(report_type: Any, formats: Any) -> dict[str, Any]:
     }
 
 
+def run_planning() -> dict[str, Any]:
+    document = build_report_document("standard")
+    actions = []
+    for item in document["product_actions"]:
+        actions.append({key: value for key, value in item.items() if key != "forecast"})
+    return {
+        "success": True,
+        "data_as_of": document["metadata"]["data_as_of"],
+        "model": document["metadata"]["model"],
+        "portfolio": document["portfolio"],
+        "quality": document["quality"],
+        "evaluation": document["metrics"],
+        "warnings": document["warnings"],
+        "actions": actions,
+    }
+
+
 def _parser() -> JsonArgumentParser:
     parser = JsonArgumentParser(description="Ray OS robust forecasting engine")
-    parser.add_argument("action", choices=("simulate", "report"))
+    parser.add_argument("action", choices=("simulate", "report", "planning"))
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--payload")
     group.add_argument("--payload-b64")
@@ -139,8 +156,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = _decode_payload(args.payload, args.payload_b64)
         if args.action == "simulate":
             result = run_simulate(payload.get("product_id", 1), payload.get("overrides", {}))
-        else:
+        elif args.action == "report":
             result = run_report(payload.get("type", "standard"), payload.get("formats"))
+        else:
+            result = run_planning()
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
         return 0
     except Exception as exc:

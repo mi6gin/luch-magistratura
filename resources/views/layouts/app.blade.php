@@ -18,8 +18,9 @@
             <a href="{{ route('dashboard') }}" class="nav-link {{ ($page ?? '') === 'dashboard' ? 'active' : '' }}"><i>◈</i><span>Обзор</span><em>01</em></a>
             <a href="{{ route('inventory') }}" class="nav-link {{ ($page ?? '') === 'inventory' ? 'active' : '' }}"><i>▤</i><span>Склад</span><em>02</em></a>
             <a href="{{ route('simulator') }}" class="nav-link {{ ($page ?? '') === 'simulator' ? 'active' : '' }}"><i>⌁</i><span>Симулятор</span><em>03</em></a>
-            <a href="{{ route('reports') }}" class="nav-link {{ ($page ?? '') === 'reports' ? 'active' : '' }}"><i>▧</i><span>Отчёты</span><em>04</em></a>
-            <a href="{{ route('knowledge') }}" class="nav-link {{ ($page ?? '') === 'knowledge' ? 'active' : '' }}"><i>?</i><span>База знаний</span><em>05</em></a>
+            <a href="{{ route('purchases') }}" class="nav-link {{ ($page ?? '') === 'purchases' ? 'active' : '' }}"><i>↓</i><span>К закупке</span><em>04</em></a>
+            <a href="{{ route('reports') }}" class="nav-link {{ ($page ?? '') === 'reports' ? 'active' : '' }}"><i>▧</i><span>Отчёты</span><em>05</em></a>
+            <a href="{{ route('knowledge') }}" class="nav-link {{ ($page ?? '') === 'knowledge' ? 'active' : '' }}"><i>?</i><span>База знаний</span><em>06</em></a>
         </nav>
         <div class="sidebar-bottom"><div class="system-status"><span class="pulse"></span><span>ALL SYSTEMS<br><b>OPERATIONAL</b></span></div><div class="location">KZ / ALMATY<br><span>UTC +05:00</span></div></div>
     </aside>
@@ -32,7 +33,7 @@
 <div id="command-palette" class="command-overlay" aria-hidden="true">
     <div class="command-palette" role="dialog" aria-modal="true" aria-label="Командная палитра">
         <div class="command-search"><span>⌕</span><input id="command-search" type="search" placeholder="Куда перейти или что сделать?"><kbd>ESC</kbd></div>
-        <div class="command-group"><span>Навигация</span><button data-command="/"><i>◈</i><b>Обзор</b><small>Главная аналитика</small><em>01</em></button><button data-command="/inventory"><i>▤</i><b>Склад</b><small>Остатки и доступность</small><em>02</em></button><button data-command="/simulator"><i>⌁</i><b>Симулятор</b><small>Сценарии прогноза</small><em>03</em></button><button data-command="/reports"><i>▧</i><b>Отчёты</b><small>PDF + презентации</small><em>04</em></button><button data-command="/knowledge"><i>?</i><b>База знаний</b><small>Методология Ray OS</small><em>05</em></button></div>
+        <div class="command-group"><span>Навигация</span><button data-command="/"><i>◈</i><b>Обзор</b><small>Главная аналитика</small><em>01</em></button><button data-command="/inventory"><i>▤</i><b>Склад</b><small>Остатки и доступность</small><em>02</em></button><button data-command="/simulator"><i>⌁</i><b>Симулятор</b><small>Сценарии прогноза</small><em>03</em></button><button data-command="/purchases"><i>↓</i><b>К закупке</b><small>Что и когда заказать</small><em>04</em></button><button data-command="/reports"><i>▧</i><b>Отчёты</b><small>PDF + презентации</small><em>05</em></button><button data-command="/knowledge"><i>?</i><b>База знаний</b><small>Методология Ray OS</small><em>06</em></button></div>
         <div class="command-hint"><span>↑↓ выбрать</span><span>↵ открыть</span><span>Esc закрыть</span></div>
     </div>
 </div>

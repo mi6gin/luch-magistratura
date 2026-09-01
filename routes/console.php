@@ -22,6 +22,7 @@ Artisan::command('rayventory:setup {--force : Replace the existing working datab
 
     if (File::isFile($target) && ! $this->option('force')) {
         $this->info("Working database already exists: {$target}");
+        $this->call('migrate', ['--force' => true]);
 
         return 0;
     }
@@ -34,6 +35,7 @@ Artisan::command('rayventory:setup {--force : Replace the existing working datab
     }
 
     $this->info("Working database is ready: {$target}");
+    $this->call('migrate', ['--force' => true]);
 
     return 0;
 })->purpose('Create the working SQLite database from the bundled demo seed');

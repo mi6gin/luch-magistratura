@@ -58,6 +58,11 @@ class MlBridge
         ]);
     }
 
+    public function planning(): array
+    {
+        return $this->run('planning', ['scope' => 'portfolio']);
+    }
+
     private function startJob(string $action, array $payload): array
     {
         $directory = storage_path('app/ml-jobs');

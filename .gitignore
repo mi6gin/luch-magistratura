@@ -3,6 +3,7 @@
 !.env.example
 
 /vendor/
+/.venv/
 /node_modules/
 /public/build/
 /public/Python/
