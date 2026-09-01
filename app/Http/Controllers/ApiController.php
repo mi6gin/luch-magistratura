@@ -8,6 +8,7 @@ use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -86,7 +87,47 @@ class ApiController extends Controller
 
     public function purchasePlan(): JsonResponse
     {
-        return $this->mlResponse($this->ml->planning());
+        return $this->mlResponse($this->enrichedPurchasePlan());
+    }
+
+    public function exportPurchasePlan(Request $request): BinaryFileResponse
+    {
+        $data = $request->validate([
+            'budget' => ['nullable', 'numeric', 'min:0'],
+            'items' => ['required', 'array', 'list', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'distinct'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+        ]);
+        $plan = $this->enrichedPurchasePlan();
+        abort_if(isset($plan['error']) || ($plan['success'] ?? true) === false, 502, 'Не удалось пересчитать план закупок.');
+        $actions = collect($plan['actions'] ?? [])->keyBy('product_id');
+        $items = [];
+        foreach ($data['items'] as $requested) {
+            $action = $actions->get((int) $requested['product_id']);
+            abort_unless($action, 422, 'В плане найден неизвестный товар. Обновите страницу.');
+            $quantity = min((int) $requested['quantity'], (int) $action['order_quantity']);
+            if ($quantity < 1) {
+                continue;
+            }
+            $items[] = [
+                ...$action,
+                'quantity' => $quantity,
+                'recommended_quantity' => (int) $action['order_quantity'],
+            ];
+        }
+        abort_if($items === [], 422, 'В корзине нет позиций для выгрузки.');
+
+        $temporary = tempnam(sys_get_temp_dir(), 'rayventory-order-');
+        abort_unless($temporary !== false, 500, 'Не удалось создать файл заказа.');
+        $path = $temporary.'.xlsx';
+        @unlink($temporary);
+        $this->excel->createPurchasePlanExport($path, $items, isset($data['budget']) ? (float) $data['budget'] : null);
+
+        return response()->download(
+            $path,
+            'rayventory_purchase_plan_'.now()->format('Y-m-d').'.xlsx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        )->deleteFileAfterSend(true);
     }
 
     public function dashboardStats(): JsonResponse
@@ -227,5 +268,23 @@ class ApiController extends Controller
         $failed = array_key_exists('error', $result) || ($result['success'] ?? true) === false;
 
         return response()->json($result, $failed ? 502 : 200);
+    }
+
+    private function enrichedPurchasePlan(): array
+    {
+        $plan = $this->ml->planning();
+        if (! isset($plan['actions']) || ! is_array($plan['actions'])) {
+            return $plan;
+        }
+        $suppliers = DB::table('product_planning_settings as settings')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'settings.supplier_id')
+            ->pluck('suppliers.name', 'settings.product_id');
+        $plan['actions'] = array_map(function (array $action) use ($suppliers): array {
+            $action['supplier'] = $suppliers[(int) $action['product_id']] ?? null;
+
+            return $action;
+        }, $plan['actions']);
+
+        return $plan;
     }
 }

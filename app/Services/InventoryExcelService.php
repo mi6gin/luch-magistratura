@@ -246,6 +246,77 @@ class InventoryExcelService
         $book->disconnectWorksheets();
     }
 
+    public function createPurchasePlanExport(string $path, array $items, ?float $budget = null): void
+    {
+        $book = new Spreadsheet;
+        $summary = $book->getActiveSheet();
+        $summary->setTitle('Сводка');
+        $summary->setShowGridlines(false);
+        $summary->mergeCells('A1:D2')->setCellValue('A1', 'RAYVENTORY  /  ПЛАН ЗАКУПОК');
+        $summary->fromArray([
+            ['Дата формирования', now()->format('Y-m-d H:i')],
+            ['Бюджет, ₸', $budget],
+            ['Позиций', count($items)],
+            ['Единиц к заказу', '=SUM(\'Заказ\'!F2:F'.(count($items) + 1).')'],
+            ['Итого, ₸', '=SUM(\'Заказ\'!H2:H'.(count($items) + 1).')'],
+        ], null, 'A4');
+        $summary->getStyle('A1:D2')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 20, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '08131D']],
+            'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $summary->getStyle('A4:A8')->getFont()->setBold(true);
+        $summary->getStyle('B5:B8')->getNumberFormat()->setFormatCode('#,##0');
+        $summary->getColumnDimension('A')->setWidth(24);
+        $summary->getColumnDimension('B')->setWidth(22);
+
+        $order = $book->createSheet();
+        $order->setTitle('Заказ');
+        $order->setShowGridlines(false);
+        $headers = ['Приоритет', 'SKU', 'Товар', 'Поставщик', 'Заказать до', 'Количество', 'Цена за единицу, ₸', 'Сумма, ₸', 'Ожидаемый дефицит', 'Комментарий'];
+        $order->fromArray($headers, null, 'A1');
+        foreach (array_values($items) as $index => $item) {
+            $row = $index + 2;
+            $order->fromArray([
+                $index + 1,
+                $item['sku'],
+                $item['product_name'],
+                $item['supplier'] ?: 'Не указан',
+                $item['best_order_date'],
+                $item['quantity'],
+                $item['unit_price'],
+                "=F{$row}*G{$row}",
+                $item['stockout_date'],
+                $item['quantity'] < $item['recommended_quantity'] ? 'Количество ограничено бюджетом' : 'Рекомендация модели',
+            ], null, "A{$row}");
+        }
+        $lastRow = count($items) + 1;
+        $order->freezePane('A2');
+        $order->setAutoFilter("A1:J{$lastRow}");
+        $order->getStyle('A1:J1')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '10232F']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $order->getRowDimension(1)->setRowHeight(30);
+        if ($lastRow >= 2) {
+            $order->getStyle("A2:J{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+            $order->getStyle("F2:F{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $order->getStyle("G2:H{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $order->getStyle("E2:E{$lastRow}")->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+            $order->getStyle("I2:I{$lastRow}")->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        }
+        foreach (['A' => 11, 'B' => 16, 'C' => 34, 'D' => 25, 'E' => 16, 'F' => 14, 'G' => 20, 'H' => 18, 'I' => 20, 'J' => 32] as $column => $width) {
+            $order->getColumnDimension($column)->setWidth($width);
+        }
+        $order->getStyle("C2:D{$lastRow}")->getAlignment()->setWrapText(true);
+        $order->getStyle("J2:J{$lastRow}")->getAlignment()->setWrapText(true);
+
+        $book->setActiveSheetIndexByName('Сводка');
+        (new Xlsx($book))->save($path);
+        $book->disconnectWorksheets();
+    }
+
     public function preview(UploadedFile $file): array
     {
         try {

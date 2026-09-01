@@ -121,6 +121,7 @@
     let forecastChart;
     let allStock = [];
     let purchaseActions = [];
+    let purchaseBudget = null;
 
     function categoryGraph(categories) {
         const colors = chartStyle();
@@ -219,18 +220,127 @@
             : '<span class="status-pill">нет</span>';
         const quality = item.quality?.grade || 'low';
         const confidence = quality === 'high' ? 'Высокая' : quality === 'medium' ? 'Средняя' : 'Низкая';
-        return `<tr data-purchase-row data-order="${item.order_quantity > 0 ? 1 : 0}" data-risk="${item.stockout_date ? 1 : 0}" data-quality="${escapeHtml(quality)}">
+        const basketQuantity = Number(item.basket_quantity ?? item.order_quantity);
+        const limited = basketQuantity < Number(item.order_quantity);
+        return `<tr data-purchase-row data-order="${basketQuantity > 0 ? 1 : 0}" data-risk="${item.stockout_date ? 1 : 0}" data-quality="${escapeHtml(quality)}">
             <td><b>${escapeHtml(item.sku || `SKU-${item.product_id}`)}</b><small class="table-subline">${escapeHtml(item.product_name)}</small></td>
+            <td>${escapeHtml(item.supplier || 'Не указан')}</td>
             <td>${Number(item.on_hand).toLocaleString('ru-RU')}</td>
             <td>${Number(item.in_transit).toLocaleString('ru-RU')}</td>
             <td>${Number(item.days_cover).toLocaleString('ru-RU')} дн.</td>
-            <td class="stock-value">${Number(item.order_quantity).toLocaleString('ru-RU')}</td>
-            <td>${Number(item.order_value).toLocaleString('ru-RU')} ₸</td>
+            <td class="stock-value">${basketQuantity.toLocaleString('ru-RU')}<small class="table-subline">${limited ? `из ${Number(item.order_quantity).toLocaleString('ru-RU')}` : 'рекомендация'}</small></td>
+            <td>${Math.round(basketQuantity * Number(item.unit_price)).toLocaleString('ru-RU')} ₸</td>
             <td>${risk}</td>
             <td><span class="confidence ${escapeHtml(quality)}">${confidence}</span></td>
             <td><button class="edit-link" data-explain="${item.product_id}">почему?</button></td>
         </tr>`;
     };
+
+    function allocatePurchaseBudget() {
+        let balance = purchaseBudget;
+        purchaseActions.forEach(item => {
+            const recommended = Math.max(0, Number(item.order_quantity));
+            const price = Math.max(0, Number(item.unit_price));
+            if (purchaseBudget === null) {
+                item.basket_quantity = recommended;
+            } else if (price <= 0) {
+                item.basket_quantity = recommended;
+            } else {
+                item.basket_quantity = Math.min(recommended, Math.floor(Math.max(balance, 0) / price));
+                balance -= item.basket_quantity * price;
+            }
+        });
+        return balance;
+    }
+
+    function renderPurchaseCalendar() {
+        const target = document.querySelector('#purchase-calendar');
+        if (!target) return;
+        const now = new Date();
+        const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+        const groups = new Map();
+        purchaseActions.filter(item => Number(item.basket_quantity) > 0).forEach(item => {
+            const date = item.best_order_date && item.best_order_date > today ? item.best_order_date : today;
+            if (!groups.has(date)) groups.set(date, []);
+            groups.get(date).push(item);
+        });
+        const entries = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(0, 8);
+        target.innerHTML = entries.length ? entries.map(([date, items]) => {
+            const amount = items.reduce((sum, item) => sum + Number(item.basket_quantity) * Number(item.unit_price), 0);
+            const label = date === today ? 'Сегодня' : new Date(`${date}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+            return `<article class="calendar-day ${date === today ? 'is-urgent' : ''}"><time datetime="${date}">${escapeHtml(label)}</time><b>${Math.round(amount).toLocaleString('ru-RU')} ₸</b>${items.slice(0, 4).map(item => `<div class="calendar-item"><span>${escapeHtml(item.product_name)}</span><strong>${Number(item.basket_quantity).toLocaleString('ru-RU')} шт.</strong></div>`).join('')}${items.length > 4 ? `<small>+ ещё ${items.length - 4}</small>` : ''}</article>`;
+        }).join('') : '<span class="calendar-empty">При текущих настройках заказов нет.</span>';
+    }
+
+    function renderPurchaseBasket() {
+        const balance = allocatePurchaseBudget();
+        const basket = purchaseActions.filter(item => Number(item.basket_quantity) > 0);
+        const value = basket.reduce((sum, item) => sum + Number(item.basket_quantity) * Number(item.unit_price), 0);
+        document.querySelector('#basket-lines').textContent = `${basket.length} SKU`;
+        document.querySelector('#basket-value').textContent = `${Math.round(value).toLocaleString('ru-RU')} ₸`;
+        document.querySelector('#basket-balance').textContent = purchaseBudget === null ? 'без лимита' : `${Math.max(0, Math.round(balance)).toLocaleString('ru-RU')} ₸`;
+        document.querySelector('#export-purchase-plan').disabled = basket.length === 0;
+        document.querySelector('#purchase-rows').innerHTML = purchaseActions.length
+            ? purchaseActions.map(purchaseRow).join('')
+            : '<tr><td colspan="10">Позиции для планирования не найдены</td></tr>';
+        document.querySelectorAll('[data-explain]').forEach(element => {
+            element.onclick = () => explainPurchase(Number(element.dataset.explain));
+        });
+        renderPurchaseCalendar();
+        filterPurchases();
+    }
+
+    function applyPurchaseBudget() {
+        const input = document.querySelector('#purchase-budget');
+        const value = Number(input?.value);
+        if (!input?.value || !Number.isFinite(value) || value <= 0) {
+            toast('Введите бюджет больше нуля', 'warning');
+            return;
+        }
+        purchaseBudget = value;
+        renderPurchaseBasket();
+        toast('Бюджет распределён по приоритету риска');
+    }
+
+    function resetPurchaseBudget() {
+        purchaseBudget = null;
+        const input = document.querySelector('#purchase-budget');
+        if (input) input.value = '';
+        renderPurchaseBasket();
+    }
+
+    async function exportPurchasePlan() {
+        const button = document.querySelector('#export-purchase-plan');
+        const items = purchaseActions.filter(item => Number(item.basket_quantity) > 0)
+            .map(item => ({ product_id: item.product_id, quantity: Number(item.basket_quantity) }));
+        if (!items.length) return;
+        setButtonLoading(button, true);
+        try {
+            const response = await fetch('/api/purchase-plan/export', {
+                method: 'POST',
+                headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ budget: purchaseBudget, items }),
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(data, response.status));
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `rayventory_purchase_plan_${new Date().toISOString().slice(0, 10)}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            toast('Заказ сформирован в Excel');
+        } catch (error) {
+            toast(error.message || 'Не удалось выгрузить заказ', 'error');
+        } finally {
+            setButtonLoading(button, false);
+        }
+    }
 
     function filterPurchases() {
         const filter = document.querySelector('#purchase-filter')?.value || 'all';
@@ -291,16 +401,10 @@
                 warningBox.innerHTML = `<b>Предупреждения данных</b><ul>${data.warnings.slice(0, 8).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
                 warningBox.classList.remove('hidden');
             } else warningBox.classList.add('hidden');
-            document.querySelector('#purchase-rows').innerHTML = purchaseActions.length
-                ? purchaseActions.map(purchaseRow).join('')
-                : '<tr><td colspan="9">Позиции для планирования не найдены</td></tr>';
-            document.querySelectorAll('[data-explain]').forEach(element => {
-                element.onclick = () => explainPurchase(Number(element.dataset.explain));
-            });
-            filterPurchases();
+            renderPurchaseBasket();
         } catch (error) {
             toast(error.message || 'Не удалось рассчитать закупки', 'error');
-            document.querySelector('#purchase-rows').innerHTML = '<tr><td colspan="9">Расчёт не выполнен</td></tr>';
+            document.querySelector('#purchase-rows').innerHTML = '<tr><td colspan="10">Расчёт не выполнен</td></tr>';
         } finally {
             setButtonLoading(button, false);
         }
@@ -803,6 +907,12 @@
     document.querySelector('#confirm-inventory-import')?.addEventListener('click', confirmInventoryImport);
     document.querySelector('#refresh-purchases')?.addEventListener('click', loadPurchasePlan);
     document.querySelector('#purchase-filter')?.addEventListener('change', filterPurchases);
+    document.querySelector('#apply-purchase-budget')?.addEventListener('click', applyPurchaseBudget);
+    document.querySelector('#reset-purchase-budget')?.addEventListener('click', resetPurchaseBudget);
+    document.querySelector('#export-purchase-plan')?.addEventListener('click', exportPurchasePlan);
+    document.querySelector('#purchase-budget')?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') applyPurchaseBudget();
+    });
     document.querySelector('#purchase-explainer-close')?.addEventListener('click', () => {
         document.querySelector('#purchase-explainer')?.classList.remove('open');
     });

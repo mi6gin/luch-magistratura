@@ -13,6 +13,18 @@
     <article class="metric-card"><span>Качество данных</span><strong id="purchase-quality" class="loading-value">—</strong><small id="purchase-quality-note">проверяем историю</small></article>
 </section>
 
+<section class="panel purchase-cockpit">
+    <div class="cockpit-copy"><span class="panel-kicker">BUDGET MODE</span><h3>Соберите заказ под доступный бюджет</h3><p>Укажите лимит — Rayventory сначала профинансирует товары с ближайшим дефицитом, затем остальные рекомендации.</p></div>
+    <label class="budget-field"><span>Бюджет закупки</span><span class="budget-input"><input id="purchase-budget" type="number" min="1" step="1000" placeholder="Например, 500 000"><b>₸</b></span></label>
+    <div class="cockpit-actions"><button class="button primary" id="apply-purchase-budget">Распределить бюджет</button><button class="button ghost" id="reset-purchase-budget">Сбросить</button></div>
+    <div class="basket-summary"><article><small>В корзине</small><b id="basket-lines">—</b></article><article><small>Сумма заказа</small><b id="basket-value">—</b></article><article><small>Остаток бюджета</small><b id="basket-balance">без лимита</b></article><button class="button primary" id="export-purchase-plan" disabled>↓ Скачать заказ Excel</button></div>
+</section>
+
+<section class="panel purchase-calendar-panel">
+    <div class="panel-header"><div><span class="panel-kicker">ORDER CALENDAR</span><h3>Календарь ближайших действий</h3><p>Когда размещать заказы, чтобы поставки успели до ожидаемого дефицита.</p></div></div>
+    <div class="purchase-calendar" id="purchase-calendar"><span class="calendar-empty">Рассчитываем даты закупок…</span></div>
+</section>
+
 <section class="panel quality-panel">
     <div class="panel-header"><div><span class="panel-kicker">DATA CONFIDENCE</span><h3>Насколько можно доверять плану</h3></div><span class="updated-at" id="purchase-data-date">данные проверяются</span></div>
     <div class="quality-grid" id="quality-grid"></div>
@@ -21,7 +33,7 @@
 
 <section class="panel purchase-panel">
     <div class="panel-header"><div><span class="panel-kicker">ACTION QUEUE</span><h3>Очередь закупок</h3><p>Сначала показаны позиции с риском дефицита и наибольшим объёмом вложений.</p></div><select id="purchase-filter"><option value="all">Все позиции</option><option value="order">Только к заказу</option><option value="risk">Только риск дефицита</option><option value="low-quality">Низкая уверенность</option></select></div>
-    <div class="table-scroll"><table class="data-table purchase-table"><thead><tr><th>SKU / товар</th><th>На складе</th><th>В пути</th><th>Дней запаса</th><th>Заказать</th><th>Сумма</th><th>Дефицит</th><th>Уверенность</th><th></th></tr></thead><tbody id="purchase-rows"><tr><td colspan="9">Рассчитываем план закупок…</td></tr></tbody></table></div>
+    <div class="table-scroll"><table class="data-table purchase-table"><thead><tr><th>SKU / товар</th><th>Поставщик</th><th>На складе</th><th>В пути</th><th>Дней запаса</th><th>В заказ</th><th>Сумма</th><th>Дефицит</th><th>Уверенность</th><th></th></tr></thead><tbody id="purchase-rows"><tr><td colspan="10">Рассчитываем план закупок…</td></tr></tbody></table></div>
 </section>
 
 <div class="drawer-backdrop purchase-explainer" id="purchase-explainer" aria-hidden="true">
