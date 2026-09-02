@@ -59,16 +59,6 @@
 .command-group button small { color: var(--muted); font-size: 10px; }
 .command-group button em { grid-column: 3; grid-row: 1 / 3; color: var(--faint); font-size: 9px; font-style: normal; }
 .command-hint { display: flex; gap: 18px; padding: 11px 17px; border-top: 1px solid var(--line); letter-spacing: 0; text-transform: none; }
-.global-loader { position: fixed; z-index: 100; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; background: rgba(7, 11, 20, .72); backdrop-filter: blur(12px); opacity: 0; visibility: hidden; }
-.global-loader.open { opacity: 1; visibility: visible; }
-.global-loader strong { font-size: 14px; }
-.global-loader small { color: var(--muted); font-size: 11px; }
-.loader-core { position: relative; display: flex; width: 72px; height: 72px; align-items: center; justify-content: center; }
-.loader-core::before, .loader-core::after { content: ""; position: absolute; border: 1px solid var(--cyan); border-radius: 50%; }
-.loader-core::before { width: 42px; height: 42px; }
-.loader-core::after { width: 66px; height: 66px; border-color: var(--violet); }
-.loader-core span { width: 5px; height: 5px; margin: 5px; border-radius: 50%; background: var(--lime); }
-.progress-line { width: 150px; height: 1px; overflow: hidden; background: var(--line); }
 .chart-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 5px; color: var(--muted); }
 .chart-empty > span { color: var(--cyan); font-size: 30px; }
 .chart-empty b { color: var(--text); font-size: 12px; }

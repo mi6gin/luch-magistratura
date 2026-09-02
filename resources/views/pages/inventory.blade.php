@@ -21,6 +21,8 @@
     <div class="panel-header"><div><span class="panel-kicker">IMPORT REVIEW / SAFE MODE</span><h3>Проверьте данные перед заменой</h3><p id="import-period"></p></div><span class="status-pill" id="import-quality">ГОТОВО</span></div>
     <div class="import-preview-metrics" id="import-preview-metrics"></div>
     <div class="import-warnings hidden" id="import-warnings"></div>
+    <div class="import-impact"><b>Что изменится после подтверждения</b><div id="import-impact-grid"></div></div>
+    <div class="import-sample"><b>Пример распознанных товаров</b><div class="table-scroll"><table class="data-table"><thead><tr><th>SKU</th><th>Название</th><th>Категория</th><th>Срок поставки</th><th>Цена</th></tr></thead><tbody id="import-sample-rows"></tbody></table></div></div>
     <div class="import-mapping"><b>Сопоставление колонок</b><p>Все обязательные поля распознаны по заголовкам шаблона. На этом этапе база ещё не изменена.</p></div>
     <div class="import-confirm-row"><span>Подтверждение заменит текущие товары, продажи, остатки и поставки. Перед заменой будет создана резервная копия.</span><button class="button primary" id="confirm-inventory-import">Подтвердить импорт</button></div>
 </section>

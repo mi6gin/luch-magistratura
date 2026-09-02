@@ -451,14 +451,27 @@ class InventoryExcelService
         File::ensureDirectoryExists($directory);
         File::put($directory.DIRECTORY_SEPARATOR.$token.'.json', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
 
+        $currentCounts = collect([
+            'products' => 'products',
+            'sales' => 'sales_history',
+            'stocks' => 'warehouse_stock',
+            'supplies' => 'warehouse_in_transit',
+        ])->map(fn (string $table): int => Schema::hasTable($table) ? DB::table($table)->count() : 0)->all();
+        $nextCounts = [
+            'products' => count($productRows),
+            'sales' => count($salesRows),
+            'stocks' => count($stockRows),
+            'supplies' => count($supplyRows),
+        ];
+
         return [
             'token' => $token,
-            'counts' => [
-                'products' => count($productRows),
-                'sales' => count($salesRows),
-                'stocks' => count($stockRows),
-                'supplies' => count($supplyRows),
-            ],
+            'counts' => $nextCounts,
+            'impact' => collect($nextCounts)->map(fn (int $next, string $key): array => [
+                'current' => $currentCounts[$key],
+                'next' => $next,
+                'delta' => $next - $currentCounts[$key],
+            ])->all(),
             'period' => ['start' => $periodStart, 'end' => $periodEnd, 'days' => $periodDays],
             'warehouses' => array_values(array_unique(array_column($stockRows, 'warehouse'))),
             'warnings' => $warnings,

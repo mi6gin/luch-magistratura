@@ -11,7 +11,6 @@ Route::post('purchase-plan/export', [ApiController::class, 'exportPurchasePlan']
 Route::post('stock/update', [ApiController::class, 'updateStock']);
 Route::post('inventory/import/preview', [ApiController::class, 'previewInventoryImport']);
 Route::post('inventory/import/confirm', [ApiController::class, 'confirmInventoryImport']);
+Route::get('model-health', [ApiController::class, 'modelHealth']);
 Route::post('simulate', [ApiController::class, 'simulate']);
-Route::post('simulate/start', [ApiController::class, 'startSimulation']);
-Route::get('jobs/{jobId}', [ApiController::class, 'job']);
 Route::post('generate-report', [ApiController::class, 'generateReport']);

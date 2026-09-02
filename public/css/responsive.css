@@ -47,7 +47,6 @@
     .result-count { align-self: center; }
     .panel { padding: 17px; border-radius: 16px; }
     .large-chart { height: 330px; }
-    .global-loader { top: 78px; right: 12px; }
     .reports-count { align-self: flex-start; }
     .report-toolbar { grid-template-columns: 1fr; gap: 18px; }
     .format-selector { min-width: 0; }

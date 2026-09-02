@@ -17,11 +17,16 @@
             "App\\": "app/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
     "scripts": {
         "post-autoload-dump": [
             "@php artisan package:discover --ansi"
         ],
-        "test": "@php artisan test"
+        "test": "@php vendor/bin/phpunit"
     },
     "minimum-stability": "stable",
     "prefer-stable": true

@@ -1,0 +1,36 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: mbstring, pdo_sqlite, zip, gd
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+      - name: PHP tests
+        run: composer test
+      - name: PHP style
+        run: vendor/bin/pint --test
+      - name: Python syntax
+        run: python -m compileall -q ml
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application image
+        run: docker build -t rayventory-ci .

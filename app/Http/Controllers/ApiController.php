@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\WarehouseStock;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
+use App\Services\ModelHealthService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,7 @@ class ApiController extends Controller
     public function __construct(
         private readonly MlBridge $ml,
         private readonly InventoryExcelService $excel,
+        private readonly ModelHealthService $modelHealth,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -67,11 +69,36 @@ class ApiController extends Controller
             return response()->json(['error' => $exception->getMessage()], 422);
         }
 
+        $adaptation = null;
+        $adaptationWarning = null;
+        $plan = $this->ml->planning();
+        if (($plan['success'] ?? true) !== false && ! isset($plan['error'])) {
+            $adaptation = $this->modelHealth->record($plan, 'excel_import', $data['file_name']);
+        } else {
+            $adaptationWarning = 'Данные импортированы, но автоматическая оценка модели не завершилась. Запустите её на экране здоровья модели.';
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Импорт подтверждён и завершён. Резервная копия предыдущих данных сохранена.',
             'counts' => $counts,
+            'adaptation' => $adaptation,
+            'warning' => $adaptationWarning,
         ]);
+    }
+
+    public function modelHealth(Request $request): JsonResponse
+    {
+        $latest = $this->modelHealth->latest();
+        if ($request->boolean('refresh') || $latest === null) {
+            $plan = $this->ml->planning();
+            if (($plan['success'] ?? true) === false || isset($plan['error'])) {
+                return $this->mlResponse($plan);
+            }
+            $latest = $this->modelHealth->record($plan, 'manual');
+        }
+
+        return response()->json(['latest' => $latest, 'history' => $this->modelHealth->history()]);
     }
 
     public function aiBriefing(): JsonResponse
@@ -194,26 +221,6 @@ class ApiController extends Controller
         ]);
 
         return $this->mlResponse($this->ml->simulate($data['product_id'], $data['overrides'] ?? []));
-    }
-
-    public function startSimulation(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'product_id' => ['required', 'integer', 'exists:products,id'],
-            'overrides' => ['sometimes', 'array:is_promo,price_change'],
-            'overrides.is_promo' => ['sometimes', 'boolean'],
-            'overrides.price_change' => ['sometimes', 'numeric', 'between:-0.5,0.5'],
-        ]);
-
-        return response()->json($this->ml->startSimulation($data['product_id'], $data['overrides'] ?? []));
-    }
-
-    public function job(string $jobId): JsonResponse
-    {
-        abort_unless(preg_match('/^[a-f0-9]{24}$/', $jobId) === 1, 404);
-        $job = $this->ml->job($jobId);
-
-        return response()->json($job, $job['status'] === 'not_found' ? 404 : 200);
     }
 
     public function generateReport(Request $request): JsonResponse

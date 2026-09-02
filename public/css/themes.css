@@ -5,11 +5,10 @@
 [data-theme="light"] .hero-card { background: linear-gradient(118deg, #fff4ed 0%, #e9f1fa 100%); border-color: rgba(24, 54, 91, .12); box-shadow: 0 20px 55px rgba(44, 76, 110, .12); }
 [data-theme="light"] .hero-copy h3 { color: var(--text); } [data-theme="light"] .hero-copy p { color: var(--muted); }
 [data-theme="light"] .metric-card, [data-theme="light"] .panel, [data-theme="light"] .quick-card, [data-theme="light"] .report-card, [data-theme="light"] .knowledge-card { background: rgba(255, 255, 255, .9); border-color: rgba(24, 54, 91, .12); box-shadow: 0 12px 35px rgba(44, 76, 110, .07); }
-[data-theme="light"] .report-feature, [data-theme="light"] .knowledge-hero { background: linear-gradient(118deg, rgba(255, 244, 237, .9), rgba(233, 241, 250, .9)); }
+[data-theme="light"] .knowledge-hero { background: linear-gradient(118deg, rgba(255, 244, 237, .9), rgba(233, 241, 250, .9)); }
 [data-theme="light"] .data-table tbody tr:hover { background: rgba(24, 54, 91, .035); }
 [data-theme="light"] .command-trigger, [data-theme="light"] .theme-toggle, [data-theme="light"] .mobile-menu, [data-theme="light"] .search-box, [data-theme="light"] .inventory-toolbar select, [data-theme="light"] .field-label select, [data-theme="light"] .modal input { background: #fff; border-color: rgba(24, 54, 91, .16); }
 [data-theme="light"] .command-overlay, [data-theme="light"] .drawer-backdrop { background: rgba(16, 35, 63, .28); }
-[data-theme="light"] .global-loader { background: rgba(244, 248, 252, .82); }
 [data-theme="light"] .metric-top, [data-theme="light"] .panel-kicker, [data-theme="light"] .data-table th { color: var(--muted); }
 [data-theme="light"] .avatar { background: linear-gradient(135deg, #f3c27d, #d65a2d); }
 [data-theme="light"] .report-card.is-primary { background: radial-gradient(circle at 92% 8%, rgba(201, 79, 40, .13), transparent 38%), linear-gradient(135deg, #fff, #edf4fa); }

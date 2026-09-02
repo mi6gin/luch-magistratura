@@ -10,38 +10,6 @@ use Throwable;
 
 class MlBridge
 {
-    public function startSimulation(int $productId, array $overrides = []): array
-    {
-        return $this->startJob('simulate', [
-            'product_id' => $productId,
-            'overrides' => $overrides,
-        ]);
-    }
-
-    public function job(string $jobId): array
-    {
-        $directory = storage_path('app/ml-jobs');
-        $statePath = $directory.DIRECTORY_SEPARATOR.$jobId.'.json';
-        if (! is_file($statePath)) {
-            return ['status' => 'not_found'];
-        }
-
-        $state = json_decode((string) file_get_contents($statePath), true);
-        if (! is_array($state)) {
-            return [
-                'status' => 'failed',
-                'result' => ['error' => 'Invalid job state'],
-            ];
-        }
-
-        $response = ['status' => $state['status'] ?? 'failed'];
-        if (isset($state['result']) && is_array($state['result'])) {
-            $response['result'] = $state['result'];
-        }
-
-        return $response;
-    }
-
     public function simulate(int $productId = 1, array $overrides = []): array
     {
         return $this->run('simulate', [
@@ -61,28 +29,6 @@ class MlBridge
     public function planning(): array
     {
         return $this->run('planning', ['scope' => 'portfolio']);
-    }
-
-    private function startJob(string $action, array $payload): array
-    {
-        $directory = storage_path('app/ml-jobs');
-        if (! is_dir($directory)) {
-            mkdir($directory, 0775, true);
-        }
-
-        $jobId = bin2hex(random_bytes(12));
-        $statePath = $directory.DIRECTORY_SEPARATOR.$jobId.'.json';
-        file_put_contents($statePath, json_encode(['status' => 'processing'], JSON_UNESCAPED_UNICODE));
-
-        $result = $this->run($action, $payload);
-        $failed = array_key_exists('error', $result) || ($result['success'] ?? true) === false;
-        $status = $failed ? 'failed' : 'completed';
-        file_put_contents($statePath, json_encode([
-            'status' => $status,
-            'result' => $result,
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-
-        return ['job_id' => $jobId, 'status' => $status];
     }
 
     private function run(string $action, array $payload): array

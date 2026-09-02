@@ -81,9 +81,6 @@
         return data;
     };
 
-    // Long-running work uses local states so navigation never gets covered.
-    const showLoader = () => {};
-    const hideLoader = () => {};
     const setButtonLoading = (button, state) => {
         if (!button) return;
         button.classList.toggle('is-loading', state);
@@ -165,7 +162,6 @@
     }
 
     async function loadData() {
-        showLoader('Синхронизация Ray OS', 'Обновляем склад, метрики и сигналы...');
         try {
             const [stats, stock, briefing] = await Promise.all([
                 api('dashboard-stats'),
@@ -209,8 +205,6 @@
             });
         } catch (error) {
             toast(error.message || 'Не удалось загрузить данные', 'error');
-        } finally {
-            hideLoader();
         }
     }
 
@@ -356,6 +350,7 @@
         if (!item) return;
         document.querySelector('#explain-name').textContent = `${item.sku || ''} · ${item.product_name}`;
         document.querySelector('#explain-content').innerHTML = `
+            <p class="explain-summary">Мы берём прогноз спроса на весь срок поставки с учётом выбранного уровня риска, затем вычитаем доступный остаток и уже заказанный товар. Отрицательный результат считается нулём.</p>
             <div class="explain-equation">
                 <article><small>Спрос на срок поставки</small><b>${Number(item.lead_time_demand).toLocaleString('ru-RU')}</b></article>
                 <span>−</span><article><small>Остаток</small><b>${Number(item.on_hand).toLocaleString('ru-RU')}</b></article>
@@ -442,7 +437,6 @@
     async function saveStock() {
         const button = document.querySelector('#modal-save');
         setButtonLoading(button, true);
-        showLoader('Обновление склада', 'Сохраняем новое количество...');
         try {
             const result = await api('stock/update', {
                 method: 'POST',
@@ -460,7 +454,6 @@
             toast(error.message || 'Ошибка обновления', 'error');
         } finally {
             setButtonLoading(button, false);
-            hideLoader();
         }
     }
 
@@ -499,6 +492,13 @@
                 ['Поставок', counts.supplies],
                 ['Дней истории', preview.period.days],
             ].map(([label, value]) => `<article><b>${Number(value || 0).toLocaleString('ru-RU')}</b><small>${label}</small></article>`).join('');
+            const impactLabels = { products: 'Товары', sales: 'Продажи', stocks: 'Остатки', supplies: 'Поставки' };
+            document.querySelector('#import-impact-grid').innerHTML = Object.entries(preview.impact || {}).map(([key, item]) => {
+                const delta = Number(item.delta || 0);
+                const deltaLabel = delta > 0 ? `+${delta}` : String(delta);
+                return `<article><small>${impactLabels[key] || key}</small><b>${Number(item.current || 0).toLocaleString('ru-RU')} → ${Number(item.next || 0).toLocaleString('ru-RU')}</b><span>изменение: <em>${deltaLabel}</em></span></article>`;
+            }).join('');
+            document.querySelector('#import-sample-rows').innerHTML = (preview.sample || []).map(item => `<tr><td>${escapeHtml(item.sku)}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.category)}</td><td>${Number(item.lead_time)} дн.</td><td>${Number(item.unit_price).toLocaleString('ru-RU')} ₸</td></tr>`).join('');
             const warnings = document.querySelector('#import-warnings');
             if (preview.warnings?.length) {
                 warnings.innerHTML = `<b>Обратите внимание</b><ul>${preview.warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
@@ -533,6 +533,8 @@
             });
             const counts = data.counts || {};
             toast(`Импорт завершён: ${counts.products || 0} товаров, ${counts.sales || 0} продаж`);
+            if (data.warning) toast(data.warning, 'error');
+            else if (data.adaptation?.evaluable) toast(`Модель проверена: WAPE ${data.adaptation.metrics.wape_pct}%`);
             inventoryImportPreview = null;
             document.querySelector('#inventory-excel').value = '';
             document.querySelector('#excel-file-name').textContent = 'Файл не выбран · максимум 20 МБ';
@@ -541,6 +543,47 @@
             await loadData();
         } catch (error) {
             toast(error.message || 'Не удалось подтвердить импорт', 'error');
+        } finally {
+            setButtonLoading(button, false);
+        }
+    }
+
+    async function loadModelHealth(refresh = false) {
+        const button = document.querySelector('#refresh-model-health');
+        setButtonLoading(button, true);
+        try {
+            const data = await api(`model-health${refresh ? '?refresh=1' : ''}`);
+            const item = data.latest;
+            const metrics = item.metrics || {};
+            const evaluable = Boolean(item.evaluable);
+            const freshnessLabels = { fresh: 'АКТУАЛЬНО', warning: 'УСТАРЕВАЮТ', critical: 'УСТАРЕЛИ' };
+            document.querySelector('#health-freshness').textContent = `${item.freshness_days} дн.`;
+            document.querySelector('#health-freshness-note').textContent = `данные на ${item.data_as_of || 'неизвестную дату'}`;
+            document.querySelector('#health-wape').textContent = evaluable ? `${metrics.wape_pct}%` : 'н/д';
+            document.querySelector('#health-bias').textContent = evaluable ? `${metrics.bias_pct > 0 ? '+' : ''}${metrics.bias_pct}%` : 'н/д';
+            document.querySelector('#health-coverage').textContent = evaluable ? `${metrics.coverage_pct}%` : 'н/д';
+            const status = document.querySelector('#health-status');
+            status.textContent = freshnessLabels[item.freshness_status] || 'ПРОВЕРЕНО';
+            status.classList.toggle('risk', item.freshness_status !== 'fresh');
+            const change = item.comparison?.wape_change_pct;
+            const comparison = change === null ? 'Это первая сохранённая оценка.' : `WAPE изменился на ${change > 0 ? '+' : ''}${change} п.п. относительно предыдущей оценки.`;
+            document.querySelector('#health-summary').textContent = evaluable
+                ? `${comparison} Проверено SKU: ${metrics.sku_count}.`
+                : 'Истории пока недостаточно для честного backtesting. Прогноз работает, но метрики точности не публикуются.';
+            document.querySelector('#health-details').innerHTML = [
+                ['Модель', item.model],
+                ['Дата оценки', new Date(item.evaluated_at).toLocaleString('ru-RU')],
+                ['Тестовый период', `${metrics.holdout_days || 0} дней`],
+                ['Наблюдений', Number(metrics.observations || 0).toLocaleString('ru-RU')],
+                ['Источник', item.source || (item.trigger === 'manual' ? 'ручная проверка' : 'Excel')],
+            ].map(([label, value]) => `<article><small>${label}</small><b>${escapeHtml(value)}</b></article>`).join('');
+            document.querySelector('#model-health-history').innerHTML = (data.history || []).map(row => {
+                const delta = row.comparison?.wape_change_pct;
+                const verdicts = { improved: 'лучше', degraded: 'хуже', baseline: 'база' };
+                return `<tr><td>${new Date(row.evaluated_at).toLocaleString('ru-RU')}</td><td>${escapeHtml(row.data_as_of || '—')}</td><td>${row.trigger === 'excel_import' ? 'Импорт Excel' : 'Ручная оценка'}</td><td>${row.evaluable ? `${row.metrics.wape_pct}%` : 'н/д'}</td><td>${delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta} п.п.`}</td><td><span class="confidence ${row.comparison?.verdict === 'degraded' ? 'low' : row.comparison?.verdict === 'improved' ? 'high' : 'medium'}">${verdicts[row.comparison?.verdict] || 'база'}</span></td></tr>`;
+            }).join('') || '<tr><td colspan="6">История пока пуста</td></tr>';
+        } catch (error) {
+            toast(error.message || 'Не удалось оценить модель', 'error');
         } finally {
             setButtonLoading(button, false);
         }
@@ -672,21 +715,6 @@
         notifyWarnings(normalizeWarnings(data.warnings), 'Прогноз рассчитан с предупреждением');
     };
 
-    async function waitForJob(jobId) {
-        for (let attempt = 0; attempt < 240; attempt += 1) {
-            const state = await api(`jobs/${jobId}`);
-            if (state.status === 'completed') {
-                if (state.result?.error) throw new Error(state.result.error);
-                return state.result;
-            }
-            if (state.status === 'failed' || state.status === 'not_found') {
-                throw new Error(state.result?.error || 'Расчёт не завершён');
-            }
-            await new Promise(resolve => setTimeout(resolve, 700));
-        }
-        throw new Error('Расчёт превысил допустимое время');
-    }
-
     async function runSimulationAsync() {
         const button = document.querySelector('#run-simulation');
         const panel = document.querySelector('.chart-panel');
@@ -696,17 +724,10 @@
         if (status) status.textContent = 'Выполняется расчёт сценария...';
         try {
             const payload = simulationPayload();
-            const started = await api('simulate/start', {
+            const data = await api('simulate', {
                 method: 'POST',
                 body: JSON.stringify(payload),
             });
-            if (!started.job_id) throw new Error('API не вернул идентификатор расчёта');
-            localStorage.setItem('rayventory-active-job', JSON.stringify({
-                jobId: started.job_id,
-                payload,
-            }));
-            const data = await waitForJob(started.job_id);
-            localStorage.removeItem('rayventory-active-job');
             finishSimulation(data, payload);
             toast('Сценарий рассчитан');
         } catch (error) {
@@ -715,22 +736,6 @@
         } finally {
             panel?.classList.remove('is-loading');
             setButtonLoading(button, false);
-        }
-    }
-
-    async function resumeSimulation() {
-        const active = localStorage.getItem('rayventory-active-job');
-        if (!active || page !== 'simulator') return;
-        try {
-            const item = JSON.parse(active);
-            applySimulationPayload(item.payload);
-            document.querySelector('#simulation-status').textContent = 'Проверяем сохранённый расчёт...';
-            const data = await waitForJob(item.jobId);
-            localStorage.removeItem('rayventory-active-job');
-            finishSimulation(data, item.payload, 'восстановлен');
-        } catch (error) {
-            localStorage.removeItem('rayventory-active-job');
-            toast(error.message || 'Не удалось восстановить расчёт', 'error');
         }
     }
 
@@ -827,7 +832,6 @@
         if (status) status.textContent = 'Готовим выбранные файлы...';
         result?.classList.add('is-loading');
         setButtonLoading(button, true);
-        showLoader('Генерация отчёта', 'Готовим выбранные форматы...');
         try {
             const data = await api('generate-report', {
                 method: 'POST',
@@ -859,7 +863,6 @@
         } finally {
             result?.classList.remove('is-loading');
             setButtonLoading(button, false);
-            hideLoader();
         }
     }
 
@@ -919,6 +922,7 @@
     document.querySelector('#purchase-explainer')?.addEventListener('click', event => {
         if (event.target.id === 'purchase-explainer') event.target.classList.remove('open');
     });
+    document.querySelector('#refresh-model-health')?.addEventListener('click', () => loadModelHealth(true));
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();
     });
@@ -1034,8 +1038,8 @@
     if (page === 'simulator') {
         loadData().finally(() => {
             restoreLastForecast();
-            resumeSimulation();
         });
     }
     if (page === 'purchases') loadPurchasePlan();
+    if (page === 'model-health') loadModelHealth();
 })();
