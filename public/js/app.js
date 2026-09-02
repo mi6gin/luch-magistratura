@@ -548,6 +548,43 @@
         }
     }
 
+    let researchExperiments = [];
+    function renderExperiment(experiment) {
+        if (!experiment) return;
+        document.querySelector('#experiment-dataset').textContent = experiment.dataset || '—';
+        document.querySelector('#experiment-series').textContent = `${Number(experiment.series_count || 0).toLocaleString('ru-RU')} временных рядов`;
+        document.querySelector('#experiment-folds').textContent = experiment.rolling_folds || 1;
+        document.querySelector('#experiment-champion').textContent = experiment.champion || '—';
+        document.querySelector('#experiment-meta').textContent = `${experiment.experiment_id} · ${new Date(experiment.created_at).toLocaleString('ru-RU')}`;
+        const results = [...(experiment.results || [])].sort((a, b) => Number(a.metrics?.wape_pct) - Number(b.metrics?.wape_pct));
+        document.querySelector('#experiment-results').innerHTML = results.map((item, index) => {
+            const metrics = item.metrics || {};
+            return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер эксперимента</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td></tr>`;
+        }).join('') || '<tr><td colspan="9">В эксперименте нет результатов</td></tr>';
+        const leader = results[0];
+        document.querySelector('#experiment-note').textContent = Number(experiment.rolling_folds || 1) > 1
+            ? `Рейтинг рассчитан по среднему WAPE на ${experiment.rolling_folds} последовательных окнах. Разброс показывает устойчивость результата.`
+            : `${leader?.model || 'Модель'} лидирует только на одном тестовом окне. Для научного вывода запустите rolling backtesting минимум на трёх окнах.`;
+    }
+
+    async function loadExperiments() {
+        try {
+            const data = await api('experiments');
+            researchExperiments = data.experiments || [];
+            document.querySelector('#experiment-count').textContent = researchExperiments.length;
+            const selector = document.querySelector('#experiment-selector');
+            selector.innerHTML = researchExperiments.map(item => `<option value="${escapeHtml(item.experiment_id)}">${escapeHtml(item.experiment_id)} · ${escapeHtml(item.champion || 'без лидера')}</option>`).join('');
+            if (!researchExperiments.length) {
+                selector.innerHTML = '<option>Экспериментов пока нет</option>';
+                document.querySelector('#experiment-results').innerHTML = '<tr><td colspan="9">Запустите исследовательский CLI, чтобы получить сравнение.</td></tr>';
+                return;
+            }
+            renderExperiment(researchExperiments[0]);
+        } catch (error) {
+            toast(error.message || 'Не удалось загрузить эксперименты', 'error');
+        }
+    }
+
     async function loadModelHealth(refresh = false) {
         const button = document.querySelector('#refresh-model-health');
         setButtonLoading(button, true);
@@ -923,6 +960,9 @@
         if (event.target.id === 'purchase-explainer') event.target.classList.remove('open');
     });
     document.querySelector('#refresh-model-health')?.addEventListener('click', () => loadModelHealth(true));
+    document.querySelector('#experiment-selector')?.addEventListener('change', event => {
+        renderExperiment(researchExperiments.find(item => item.experiment_id === event.target.value));
+    });
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();
     });
@@ -1042,4 +1082,5 @@
     }
     if (page === 'purchases') loadPurchasePlan();
     if (page === 'model-health') loadModelHealth();
+    if (page === 'experiments') loadExperiments();
 })();

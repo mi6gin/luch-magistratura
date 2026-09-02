@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
+use App\Services\ResearchExperimentService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -14,7 +15,7 @@ class ApplicationTest extends TestCase
 {
     public function test_all_workspace_pages_are_available(): void
     {
-        foreach (['/', '/inventory', '/simulator', '/purchases', '/reports', '/knowledge', '/model-health'] as $path) {
+        foreach (['/', '/inventory', '/simulator', '/purchases', '/reports', '/knowledge', '/model-health', '/experiments'] as $path) {
             $this->get($path)->assertOk();
         }
     }
@@ -33,6 +34,31 @@ class ApplicationTest extends TestCase
             $this->assertSame('improved', $second['comparison']['verdict']);
             $this->assertSame(-4.5, $second['comparison']['wape_change_pct']);
             $this->assertCount(2, $service->history());
+        } finally {
+            File::deleteDirectory($directory);
+        }
+    }
+
+    public function test_research_experiment_registry_rejects_paths_and_returns_results(): void
+    {
+        $directory = sys_get_temp_dir().'/rayventory-experiments-'.bin2hex(random_bytes(5));
+        config(['rayventory.experiments_path' => $directory]);
+        File::ensureDirectoryExists($directory.'/EXP-20260902T120000Z-ABC123');
+        File::put($directory.'/EXP-20260902T120000Z-ABC123/result.json', json_encode([
+            'experiment_id' => 'EXP-20260902T120000Z-ABC123',
+            'created_at' => '2026-09-02T12:00:00+00:00',
+            'dataset' => ['dataset' => 'UCI Online Retail II', 'series_count' => 300],
+            'rolling_folds' => 3,
+            'champion' => 'gru',
+            'results' => [['model' => 'gru', 'metrics' => ['wape_pct' => 20.1]]],
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $service = app(ResearchExperimentService::class);
+            $this->assertCount(1, $service->list());
+            $this->assertSame('gru', $service->find('EXP-20260902T120000Z-ABC123')['champion']);
+            $this->assertNull($service->find('../secrets'));
+            $this->getJson('/api/experiments')->assertOk()->assertJsonPath('experiments.0.rolling_folds', 3);
         } finally {
             File::deleteDirectory($directory);
         }

@@ -55,15 +55,24 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
     best_loss, best_state, stale_epochs = float("inf"), None, 0
     started = time.perf_counter()
     epochs = 0
+    history = []
     for epoch in range(config.max_epochs):
         model.train()
+        train_total, train_batches = 0.0, 0
         for x, y in train_loader:
             optimizer.zero_grad()
             loss = pinball_loss(model(x.to(device)), y.to(device))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            train_total += float(loss.item())
+            train_batches += 1
         validation_loss = _loss(model, validation_loader, device)
+        history.append({
+            "epoch": epoch + 1,
+            "train_loss": round(train_total / max(train_batches, 1), 6),
+            "validation_loss": round(validation_loss, 6),
+        })
         epochs = epoch + 1
         if validation_loss < best_loss - 1e-5:
             best_loss = validation_loss
@@ -85,6 +94,7 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "device": str(device),
         "weights": weights.name,
+        "loss_history": history,
     }
 
 
@@ -113,4 +123,3 @@ def evaluate_model(name: str, checkpoint_path: Path, test, sales_scales: dict[st
 
 def save_result(path: Path, result: dict) -> None:
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-

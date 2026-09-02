@@ -31,6 +31,7 @@ def main() -> None:
     train.add_argument("--epochs", type=int, default=100)
     train.add_argument("--patience", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=64)
+    train.add_argument("--folds", type=int, choices=range(1, 7), default=3)
     args = parser.parse_args()
 
     if args.action == "prepare-m5":
@@ -39,7 +40,7 @@ def main() -> None:
         print(json.dumps(asdict(prepare_uci_online_retail(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "train":
         config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
-        result = run_experiment(args.data, args.manifest, args.output, args.models, config)
+        result = run_experiment(args.data, args.manifest, args.output, args.models, config, folds=args.folds)
         print(json.dumps(result, ensure_ascii=False))
 
 

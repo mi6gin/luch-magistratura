@@ -7,6 +7,7 @@ use App\Models\WarehouseStock;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
+use App\Services\ResearchExperimentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ class ApiController extends Controller
         private readonly MlBridge $ml,
         private readonly InventoryExcelService $excel,
         private readonly ModelHealthService $modelHealth,
+        private readonly ResearchExperimentService $experiments,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -99,6 +101,19 @@ class ApiController extends Controller
         }
 
         return response()->json(['latest' => $latest, 'history' => $this->modelHealth->history()]);
+    }
+
+    public function experiments(): JsonResponse
+    {
+        return response()->json(['experiments' => $this->experiments->list()]);
+    }
+
+    public function experiment(string $id): JsonResponse
+    {
+        $experiment = $this->experiments->find($id);
+        abort_if($experiment === null, 404);
+
+        return response()->json($experiment);
     }
 
     public function aiBriefing(): JsonResponse

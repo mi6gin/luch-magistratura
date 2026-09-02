@@ -8,5 +8,6 @@ return [
         env('DB_DATABASE', storage_path('app/rayventory/inventory_forecast.db')),
     ),
     'reports_path' => env('ML_REPORTS_PATH', storage_path('app/reports')),
+    'experiments_path' => env('ML_EXPERIMENTS_PATH', storage_path('app/experiments')),
     'timeout' => env('ML_TIMEOUT', 120),
 ];
