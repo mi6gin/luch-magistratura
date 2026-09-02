@@ -161,6 +161,9 @@
 .experiment-summary .metric-card strong { overflow: hidden; font-size: clamp(20px, 2vw, 28px); text-overflow: ellipsis; white-space: nowrap; }
 .local-training-panel { margin-bottom: 22px; }
 .dataset-analysis-panel { margin-bottom: 22px; }
+.tuning-panel { margin-bottom: 22px; min-width: 0; }
+.tuning-panel .table-scroll { overflow-x: auto; }
+.tuning-panel table { min-width: 760px; }
 .demand-type-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 .demand-type-grid article { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .demand-type-grid span, .demand-type-grid b { display: block; }

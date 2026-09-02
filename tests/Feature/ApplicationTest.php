@@ -181,6 +181,25 @@ class ApplicationTest extends TestCase
         }
     }
 
+    public function test_tuning_api_returns_latest_comparative_result(): void
+    {
+        $directory = sys_get_temp_dir().'/rayventory-tuning-'.bin2hex(random_bytes(5));
+        config(['rayventory.tuning_path' => $directory]);
+        File::ensureDirectoryExists($directory.'/TUNE-TEST');
+        File::put($directory.'/TUNE-TEST/result.json', json_encode([
+            'tuning_id' => 'TUNE-TEST',
+            'trials' => [['model' => 'gru', 'metrics' => ['wape_pct' => 20.0]]],
+            'best_by_model' => ['gru' => ['model' => 'gru']],
+        ], JSON_THROW_ON_ERROR));
+        try {
+            $this->getJson('/api/tuning')->assertOk()
+                ->assertJsonPath('tuning.tuning_id', 'TUNE-TEST')
+                ->assertJsonPath('tuning.trials.0.model', 'gru');
+        } finally {
+            File::deleteDirectory($directory);
+        }
+    }
+
     public function test_inventory_import_requires_an_xlsx_file(): void
     {
         $this->postJson('/api/inventory/import/preview')->assertUnprocessable()

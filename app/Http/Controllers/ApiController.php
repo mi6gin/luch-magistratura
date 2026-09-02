@@ -12,6 +12,7 @@ use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
+use App\Services\ResearchTuningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,7 @@ class ApiController extends Controller
         private readonly LocalTrainingService $localTraining,
         private readonly LocalModelPipelineService $localPipeline,
         private readonly DatasetAnalysisService $datasetAnalysis,
+        private readonly ResearchTuningService $tuning,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -144,6 +146,11 @@ class ApiController extends Controller
     public function datasetAnalysis(): JsonResponse
     {
         return response()->json(['analysis' => $this->datasetAnalysis->latest()]);
+    }
+
+    public function tuning(): JsonResponse
+    {
+        return response()->json(['tuning' => $this->tuning->latest()]);
     }
 
     public function startTrainingPipeline(): JsonResponse

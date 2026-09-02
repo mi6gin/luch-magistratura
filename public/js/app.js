@@ -637,6 +637,15 @@
         document.querySelector('#analysis-conclusion').textContent = `Преобладающий тип спроса: ${labels[dominant?.[0]] || 'не определён'}. Анализ выполнен за ${Number(analysis.performance.analysis_seconds).toLocaleString('ru-RU')} сек.`;
     }
 
+    async function loadTuning() {
+        const data = await api('tuning');
+        const tuning = data.tuning;
+        if (!tuning) return;
+        document.querySelector('#tuning-meta').textContent = `${tuning.tuning_id} · ${tuning.trials.length} конфигураций · ${tuning.folds} rolling-окон`;
+        const best = Object.values(tuning.best_by_model || {}).sort((a, b) => a.metrics.wape_pct - b.metrics.wape_pct);
+        document.querySelector('#tuning-results').innerHTML = best.map((item, index) => `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лучший вариант</span>' : ''}</td><td>${Number(item.metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>${item.parameters.hidden_size}</td><td>${item.parameters.history_days} дней</td><td>${item.parameters.learning_rate}</td><td>${Number(item.training_seconds).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count).toLocaleString('ru-RU')}</td></tr>`).join('');
+    }
+
     async function startLocalTraining(button) {
         setButtonLoading(button, true);
         try {
@@ -1196,5 +1205,6 @@
         loadTrainingReadiness().catch(error => toast(error.message, 'error'));
         loadTrainingPipeline().catch(error => toast(error.message, 'error'));
         loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
+        loadTuning().catch(error => toast(error.message, 'error'));
     }
 })();

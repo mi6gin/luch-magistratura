@@ -9,6 +9,7 @@ from pathlib import Path
 from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail
 from research.analysis import analyze_dataset
 from research.experiment import run_experiment
+from research.tuning import tune_models
 from research.trainer import TrainingConfig
 
 
@@ -34,6 +35,17 @@ def main() -> None:
     analyze.add_argument("--data", type=Path, required=True)
     analyze.add_argument("--manifest", type=Path, required=True)
     analyze.add_argument("--output", type=Path, default=Path("storage/app/dataset-analysis/latest.json"))
+    tune = subparsers.add_parser("tune", help="Run reproducible hyperparameter search for neural architectures")
+    tune.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
+    tune.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
+    tune.add_argument("--experiments-output", type=Path, default=Path("storage/app/experiments"))
+    tune.add_argument("--output", type=Path, default=Path("storage/app/tuning"))
+    tune.add_argument("--models", nargs="+", choices=["lstm", "gru", "transformer"], default=["lstm", "gru", "transformer"])
+    tune.add_argument("--preset", choices=["smoke", "full"], default="smoke")
+    tune.add_argument("--folds", type=int, choices=range(1, 7), default=1)
+    tune.add_argument("--epochs", type=int, default=3)
+    tune.add_argument("--patience", type=int, default=2)
+    tune.add_argument("--batch-size", type=int, default=256)
     train = subparsers.add_parser("train", help="Compare demand-aware baselines, LSTM, GRU and Transformer")
     train.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
     train.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
@@ -54,6 +66,18 @@ def main() -> None:
         print(json.dumps(asdict(prepare_local_inventory(args.database, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "analyze":
         print(json.dumps({"success": True, **analyze_dataset(args.data, args.manifest, args.output)}, ensure_ascii=False))
+    elif args.action == "tune":
+        result = tune_models(
+            args.data, args.manifest, args.experiments_output, args.output, args.models,
+            args.preset, args.folds, args.epochs, args.patience, args.batch_size,
+        )
+        print(json.dumps({
+            "success": True,
+            "tuning_id": result["tuning_id"],
+            "winner": result["winner"]["model"],
+            "winner_wape_pct": result["winner"]["metrics"]["wape_pct"],
+            "trials": len(result["trials"]),
+        }, ensure_ascii=False))
     elif args.action == "train":
         config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
         result = run_experiment(args.data, args.manifest, args.output, args.models, config, folds=args.folds)
