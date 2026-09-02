@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from research.data import prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.dataset import FEATURES, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
-from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, seasonal_baseline
+from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, risk_calibrated_baseline, seasonal_baseline
 
 
 class ResearchPipelineTest(unittest.TestCase):
@@ -25,6 +25,8 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["wape_pct"], 11.6667)
         self.assertAlmostEqual(metrics["mae"], 2.3333)
         self.assertAlmostEqual(metrics["bias_pct"], 5.0)
+        self.assertAlmostEqual(metrics["underforecast_pct"], 3.3333)
+        self.assertAlmostEqual(metrics["risk_cost_pct"], 15.0)
         self.assertEqual(interval_coverage(actual, actual - 1, actual + 1), 100.0)
 
     def test_quantile_crossing_is_detected(self):
@@ -103,6 +105,16 @@ class ResearchPipelineTest(unittest.TestCase):
         result = adaptive_baseline(values, (history, test_target, ["sku-a", "sku-b"]), {"sku-a": 1, "sku-b": 1})
         self.assertEqual(result["routes"]["smooth"], "seasonal_naive_7")
         self.assertEqual(result["metrics"]["wape_pct"], 97.9798)
+
+    def test_risk_router_calibrates_against_underforecasting(self):
+        history = np.zeros((2, 90, len(FEATURES)), dtype=np.float32)
+        history[:, :, 0] = 2
+        validation_target = np.full((2, 28), 4, dtype=np.float32)
+        test_target = np.full((2, 28), 4, dtype=np.float32)
+        values = (history, validation_target, ["sku-a", "sku-b"])
+        result = risk_calibrated_baseline(values, values, {"sku-a": 1, "sku-b": 1})
+        self.assertTrue(result["routes"]["smooth"].endswith("× 2"))
+        self.assertEqual(result["metrics"]["underforecast_pct"], 0.0)
 
     def test_prepare_m5_creates_data_and_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:

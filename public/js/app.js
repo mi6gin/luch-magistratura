@@ -559,8 +559,8 @@
         const results = [...(experiment.results || [])].sort((a, b) => Number(a.metrics?.wape_pct) - Number(b.metrics?.wape_pct));
         document.querySelector('#experiment-results').innerHTML = results.map((item, index) => {
             const metrics = item.metrics || {};
-            return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер эксперимента</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td></tr>`;
-        }).join('') || '<tr><td colspan="9">В эксперименте нет результатов</td></tr>';
+            return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер по WAPE</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.underforecast_pct === undefined ? 'н/д' : `${Number(metrics.underforecast_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.risk_cost_pct === undefined ? 'н/д' : `${Number(metrics.risk_cost_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td></tr>`;
+        }).join('') || '<tr><td colspan="11">В эксперименте нет результатов</td></tr>';
         const segmentKeys = ['smooth', 'intermittent', 'erratic', 'lumpy'];
         document.querySelector('#experiment-segments').innerHTML = results.map(item => `<tr><td><b>${escapeHtml(item.model)}</b></td>${segmentKeys.map(key => {
             const segment = item.metrics?.segments?.[key];
@@ -582,7 +582,7 @@
             selector.innerHTML = researchExperiments.map(item => `<option value="${escapeHtml(item.experiment_id)}">${escapeHtml(item.experiment_id)} · ${escapeHtml(item.champion || 'без лидера')}</option>`).join('');
             if (!researchExperiments.length) {
                 selector.innerHTML = '<option>Экспериментов пока нет</option>';
-                document.querySelector('#experiment-results').innerHTML = '<tr><td colspan="9">Запустите исследовательский CLI, чтобы получить сравнение.</td></tr>';
+                document.querySelector('#experiment-results').innerHTML = '<tr><td colspan="11">Запустите исследовательский CLI, чтобы получить сравнение.</td></tr>';
                 return;
             }
             renderExperiment(researchExperiments[0]);

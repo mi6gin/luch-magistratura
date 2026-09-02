@@ -8,11 +8,15 @@ def point_metrics(actual: np.ndarray, predicted: np.ndarray) -> dict[str, float]
     predicted = np.asarray(predicted, dtype=float)
     error = predicted - actual
     denominator = max(float(np.abs(actual).sum()), 1e-9)
+    shortage = np.maximum(actual - predicted, 0)
+    excess = np.maximum(predicted - actual, 0)
     return {
         "wape_pct": round(float(np.abs(error).sum() / denominator * 100), 4),
         "mae": round(float(np.abs(error).mean()), 4),
         "rmse": round(float(np.sqrt(np.mean(error**2))), 4),
         "bias_pct": round(float(error.sum() / denominator * 100), 4),
+        "underforecast_pct": round(float(shortage.sum() / denominator * 100), 4),
+        "risk_cost_pct": round(float((2 * shortage.sum() + excess.sum()) / denominator * 100), 4),
     }
 
 

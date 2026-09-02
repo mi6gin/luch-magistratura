@@ -102,6 +102,32 @@ def adaptive_baseline(validation, test, sales_scales: dict[str, float]) -> dict:
     return result
 
 
+def risk_calibrated_baseline(validation, test, sales_scales: dict[str, float]) -> dict:
+    validation_predictions = _baseline_predictions(validation)
+    test_predictions = _baseline_predictions(test)
+    validation_labels = np.asarray([demand_type(history) for history in validation[0][..., 0]])
+    test_labels = np.asarray([demand_type(history) for history in test[0][..., 0]])
+    prediction = np.zeros_like(test[1])
+    policies = {}
+    multipliers = np.arange(0.5, 4.01, 0.25)
+    for label in ("smooth", "intermittent", "erratic", "lumpy"):
+        validation_mask = validation_labels == label
+        if not np.any(validation_mask):
+            continue
+        candidates = (
+            (point_metrics(validation[1][validation_mask], values[validation_mask] * multiplier)["risk_cost_pct"], name, multiplier)
+            for name, values in validation_predictions.items()
+            for multiplier in multipliers
+        )
+        _, method, multiplier = min(candidates)
+        test_mask = test_labels == label
+        prediction[test_mask] = test_predictions[method][test_mask] * multiplier
+        policies[label] = f"{method} × {multiplier:g}"
+    result = _baseline_result("risk_calibrated_router", prediction, test, sales_scales)
+    result["routes"] = policies
+    return result
+
+
 def _fold_manifest(base: dict, fold_index: int, fold_count: int, step_days: int = 28) -> dict:
     offset = (fold_count - fold_index - 1) * step_days
     test_end = pd.Timestamp(base["test_end"]) - pd.Timedelta(days=offset)
@@ -122,7 +148,10 @@ def _aggregate(results: list[dict]) -> list[dict]:
     aggregated = []
     for name in model_names:
         folds = [next(item for item in result if item["model"] == name) for result in results]
-        metric_names = ["wape_pct", "mae", "rmse", "bias_pct"]
+        metric_names = [
+            metric for metric in ("wape_pct", "mae", "rmse", "bias_pct", "underforecast_pct", "risk_cost_pct")
+            if all(metric in fold["metrics"] for fold in folds)
+        ]
         metrics = {}
         for metric in metric_names:
             values = np.asarray([fold["metrics"][metric] for fold in folds], dtype=float)
@@ -138,7 +167,7 @@ def _aggregate(results: list[dict]) -> list[dict]:
             available = [fold["metrics"]["segments"][segment] for fold in folds if segment in fold["metrics"].get("segments", {})]
             segments[segment] = {
                 metric: round(float(np.mean([item[metric] for item in available])), 4)
-                for metric in metric_names
+                for metric in metric_names if all(metric in item for item in available)
             }
             segments[segment]["windows"] = int(sum(item["windows"] for item in available))
         metrics["segments"] = segments
@@ -187,6 +216,7 @@ def run_experiment(
             median_baseline(test, scales.sales),
             croston_baseline(test, scales.sales),
             adaptive_baseline(validation, test, scales.sales),
+            risk_calibrated_baseline(validation, test, scales.sales),
         ]
         fold_dir = output_dir / f"fold-{fold_index + 1}"
         for name in models:

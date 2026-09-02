@@ -23,7 +23,7 @@ def main() -> None:
     prepare_uci.add_argument("--output-dir", type=Path, default=Path("data/processed/uci-online-retail"))
     prepare_uci.add_argument("--series", type=int, default=300)
     prepare_uci.add_argument("--seed", type=int, default=42)
-    train = subparsers.add_parser("train", help="Train and compare baseline, LSTM, GRU and Transformer")
+    train = subparsers.add_parser("train", help="Compare demand-aware baselines, LSTM, GRU and Transformer")
     train.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
     train.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
     train.add_argument("--output", type=Path, default=Path("storage/app/experiments"))
