@@ -200,6 +200,25 @@ class ApplicationTest extends TestCase
         }
     }
 
+    public function test_scenario_api_returns_latest_applicability_benchmark(): void
+    {
+        $directory = sys_get_temp_dir().'/rayventory-scenarios-'.bin2hex(random_bytes(5));
+        config(['rayventory.scenarios_path' => $directory]);
+        File::ensureDirectoryExists($directory.'/SCENARIO-TEST');
+        File::put($directory.'/SCENARIO-TEST/result.json', json_encode([
+            'benchmark_id' => 'SCENARIO-TEST',
+            'scenarios' => [['scenario' => 'trend', 'winner' => 'gru']],
+            'models' => ['gru' => ['mean_wape_pct' => 12.0]],
+        ], JSON_THROW_ON_ERROR));
+        try {
+            $this->getJson('/api/scenarios')->assertOk()
+                ->assertJsonPath('benchmark.benchmark_id', 'SCENARIO-TEST')
+                ->assertJsonPath('benchmark.scenarios.0.scenario', 'trend');
+        } finally {
+            File::deleteDirectory($directory);
+        }
+    }
+
     public function test_inventory_import_requires_an_xlsx_file(): void
     {
         $this->postJson('/api/inventory/import/preview')->assertUnprocessable()

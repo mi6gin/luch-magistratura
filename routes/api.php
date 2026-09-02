@@ -20,6 +20,7 @@ Route::get('training-pipeline', [ApiController::class, 'trainingPipeline']);
 Route::post('training-pipeline', [ApiController::class, 'startTrainingPipeline']);
 Route::get('dataset-analysis', [ApiController::class, 'datasetAnalysis']);
 Route::get('tuning', [ApiController::class, 'tuning']);
+Route::get('scenarios', [ApiController::class, 'scenarios']);
 Route::post('models/candidates', [ApiController::class, 'registerModelCandidate']);
 Route::post('models/{id}/promote', [ApiController::class, 'promoteModel'])->where('id', '[A-Za-z0-9_-]+(?:--[A-Za-z0-9_-]+)?');
 Route::post('simulate', [ApiController::class, 'simulate']);

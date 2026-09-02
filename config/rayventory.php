@@ -17,5 +17,6 @@ return [
     'local_training_data_path' => env('ML_LOCAL_DATA_PATH') ?: base_path('data/processed/local-inventory'),
     'dataset_analysis_path' => env('ML_DATASET_ANALYSIS_PATH') ?: storage_path('app/dataset-analysis/latest.json'),
     'tuning_path' => env('ML_TUNING_PATH') ?: storage_path('app/tuning'),
+    'scenarios_path' => env('ML_SCENARIOS_PATH') ?: storage_path('app/scenarios'),
     'timeout' => env('ML_TIMEOUT', 120),
 ];

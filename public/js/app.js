@@ -646,6 +646,23 @@
         document.querySelector('#tuning-results').innerHTML = best.map((item, index) => `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лучший вариант</span>' : ''}</td><td>${Number(item.metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>${item.parameters.hidden_size}</td><td>${item.parameters.history_days} дней</td><td>${item.parameters.learning_rate}</td><td>${Number(item.training_seconds).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count).toLocaleString('ru-RU')}</td></tr>`).join('');
     }
 
+    async function loadScenarios() {
+        const data = await api('scenarios');
+        const benchmark = data.benchmark;
+        if (!benchmark) return;
+        const labels = { seasonality: 'Сезонность', trend: 'Тренд', promotion: 'Промо', external_factors: 'Внешние факторы' };
+        document.querySelector('#scenario-meta').textContent = `${benchmark.benchmark_id} · ${benchmark.series_count} рядов · ${benchmark.config.max_epochs} эпох`;
+        document.querySelector('#scenario-results').innerHTML = benchmark.scenarios.map(scenario => {
+            const winner = scenario.results.find(item => item.model === scenario.winner);
+            const neural = scenario.results.find(item => item.model === scenario.best_neural);
+            return `<tr><td><b>${labels[scenario.scenario] || escapeHtml(scenario.scenario)}</b></td><td>${escapeHtml(scenario.winner)}</td><td>${Number(winner?.metrics?.wape_pct).toLocaleString('ru-RU')}%</td><td>${escapeHtml(scenario.best_neural || '—')}</td><td>${neural ? `${Number(neural.metrics.wape_pct).toLocaleString('ru-RU')}%` : '—'}</td></tr>`;
+        }).join('');
+        const neuralRanking = Object.entries(benchmark.models || {}).sort((a, b) => a[1].mean_wape_pct - b[1].mean_wape_pct);
+        document.querySelector('#scenario-conclusion').textContent = neuralRanking.length
+            ? `Среди нейросетей лидирует ${neuralRanking[0][0]}: средний WAPE ${Number(neuralRanking[0][1].mean_wape_pct).toLocaleString('ru-RU')}%, побед в сценариях — ${neuralRanking[0][1].scenario_wins}.`
+            : 'Нейросетевые результаты отсутствуют.';
+    }
+
     async function startLocalTraining(button) {
         setButtonLoading(button, true);
         try {
@@ -1206,5 +1223,6 @@
         loadTrainingPipeline().catch(error => toast(error.message, 'error'));
         loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
         loadTuning().catch(error => toast(error.message, 'error'));
+        loadScenarios().catch(error => toast(error.message, 'error'));
     }
 })();

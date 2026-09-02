@@ -10,6 +10,7 @@ from research.data import prepare_local_inventory, prepare_m5, prepare_uci_onlin
 from research.analysis import analyze_dataset
 from research.experiment import run_experiment
 from research.tuning import tune_models
+from research.scenarios import benchmark_scenarios
 from research.trainer import TrainingConfig
 
 
@@ -46,6 +47,16 @@ def main() -> None:
     tune.add_argument("--epochs", type=int, default=3)
     tune.add_argument("--patience", type=int, default=2)
     tune.add_argument("--batch-size", type=int, default=256)
+    scenarios = subparsers.add_parser("scenarios", help="Compare models under controlled seasonality, trend, promotion and external factors")
+    scenarios.add_argument("--output", type=Path, default=Path("storage/app/scenarios"))
+    scenarios.add_argument("--experiments-output", type=Path, default=Path("storage/app/experiments"))
+    scenarios.add_argument("--models", nargs="+", choices=["lstm", "gru", "transformer"], default=["lstm", "gru", "transformer"])
+    scenarios.add_argument("--folds", type=int, choices=range(1, 7), default=1)
+    scenarios.add_argument("--epochs", type=int, default=3)
+    scenarios.add_argument("--patience", type=int, default=2)
+    scenarios.add_argument("--batch-size", type=int, default=256)
+    scenarios.add_argument("--series", type=int, default=12)
+    scenarios.add_argument("--days", type=int, default=360)
     train = subparsers.add_parser("train", help="Compare demand-aware baselines, LSTM, GRU and Transformer")
     train.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
     train.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
@@ -77,6 +88,17 @@ def main() -> None:
             "winner": result["winner"]["model"],
             "winner_wape_pct": result["winner"]["metrics"]["wape_pct"],
             "trials": len(result["trials"]),
+        }, ensure_ascii=False))
+    elif args.action == "scenarios":
+        config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
+        result = benchmark_scenarios(
+            args.output, args.experiments_output, args.models, config,
+            args.folds, args.series, args.days,
+        )
+        print(json.dumps({
+            "success": True, "benchmark_id": result["benchmark_id"],
+            "scenarios": {item["scenario"]: item["winner"] for item in result["scenarios"]},
+            "total_seconds": result["total_seconds"],
         }, ensure_ascii=False))
     elif args.action == "train":
         config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
