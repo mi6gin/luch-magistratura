@@ -10,5 +10,6 @@ return [
     'reports_path' => env('ML_REPORTS_PATH', storage_path('app/reports')),
     'experiments_path' => env('ML_EXPERIMENTS_PATH', storage_path('app/experiments')),
     'model_registry_path' => env('ML_MODEL_REGISTRY_PATH') ?: storage_path('app/model-registry/registry.json'),
+    'models_path' => env('ML_MODELS_PATH') ?: storage_path('app/models'),
     'timeout' => env('ML_TIMEOUT', 120),
 ];

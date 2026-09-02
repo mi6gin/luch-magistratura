@@ -99,6 +99,41 @@ class ApplicationTest extends TestCase
         }
     }
 
+    public function test_local_policy_artifact_can_pass_checks_and_be_promoted(): void
+    {
+        $root = sys_get_temp_dir().'/rayventory-local-policy-'.bin2hex(random_bytes(5));
+        $experiments = $root.'/experiments';
+        config([
+            'rayventory.experiments_path' => $experiments,
+            'rayventory.model_registry_path' => $root.'/registry.json',
+            'rayventory.models_path' => $root.'/models',
+        ]);
+        File::ensureDirectoryExists($experiments.'/EXP-20260902T130000Z-ABC123');
+        File::put($experiments.'/EXP-20260902T130000Z-ABC123/result.json', json_encode([
+            'experiment_id' => 'EXP-20260902T130000Z-ABC123',
+            'created_at' => '2026-09-02T13:00:00+00:00',
+            'dataset' => ['dataset' => 'Local Rayventory inventory'],
+            'rolling_folds' => 3,
+            'results' => [[
+                'model' => 'risk_calibrated_router',
+                'metrics' => ['wape_pct' => 18.2],
+                'routes' => ['smooth' => 'moving_median_28 × 1.25'],
+            ]],
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $registry = app(ModelRegistryService::class);
+            $candidate = $registry->registerCandidate('EXP-20260902T130000Z-ABC123', 'risk_calibrated_router');
+            $this->assertTrue($candidate['eligible']);
+            $this->assertFileExists($candidate['artifact_path']);
+            $production = $registry->promote($candidate['id']);
+            $this->assertSame('production', $production['status']);
+            $this->assertSame('local-demand-router-v1', $production['name']);
+        } finally {
+            File::deleteDirectory($root);
+        }
+    }
+
     public function test_local_training_readiness_explains_insufficient_history(): void
     {
         Schema::create('sales_history', function (Blueprint $table): void {

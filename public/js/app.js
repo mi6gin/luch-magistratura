@@ -598,7 +598,7 @@
         const candidates = (state.models || []).filter(item => item.status !== 'production');
         document.querySelector('#model-registry-list').innerHTML = candidates.map(item => {
             const failed = (item.checks || []).filter(check => !check.passed);
-            return `<article><div><b>${escapeHtml(item.name)}</b><span>${escapeHtml(item.status)} · ${escapeHtml(item.experiment_id || 'встроенная')}</span></div><em class="${item.eligible ? 'registry-ready' : 'registry-blocked'}">${item.eligible ? 'готов к публикации' : 'публикация заблокирована'}</em>${failed.length ? `<p>${failed.map(check => escapeHtml(check.message)).join(' ')}</p>` : ''}</article>`;
+            return `<article><div><b>${escapeHtml(item.name)}</b><span>${escapeHtml(item.status)} · ${escapeHtml(item.experiment_id || 'встроенная')}</span></div><div class="registry-state"><em class="${item.eligible ? 'registry-ready' : 'registry-blocked'}">${item.eligible ? 'готов к публикации' : 'публикация заблокирована'}</em>${item.eligible && item.status === 'candidate' ? `<button class="button primary registry-promote" data-model-id="${escapeHtml(item.id)}">Опубликовать</button>` : ''}</div>${failed.length ? `<p>${failed.map(check => escapeHtml(check.message)).join(' ')}</p>` : ''}</article>`;
         }).join('') || '<p>Кандидатов пока нет. Добавьте модель из таблицы эксперимента.</p>';
     }
 
@@ -626,6 +626,23 @@
             await loadModelRegistry();
         } catch (error) {
             toast(error.message || 'Не удалось зарегистрировать кандидата', 'error');
+        } finally {
+            setButtonLoading(button, false);
+        }
+    }
+
+    async function promoteModel(button) {
+        if (!window.confirm('Опубликовать кандидата в production? Текущая модель будет сохранена в архиве.')) return;
+        setButtonLoading(button, true);
+        try {
+            await api(`models/${encodeURIComponent(button.dataset.modelId)}/promote`, {
+                method: 'POST',
+                body: JSON.stringify({ confirmation: 'PROMOTE' }),
+            });
+            toast('Новая production-модель опубликована');
+            await loadModelRegistry();
+        } catch (error) {
+            toast(error.message || 'Публикация модели заблокирована', 'error');
         } finally {
             setButtonLoading(button, false);
         }
@@ -1012,6 +1029,10 @@
     document.querySelector('#experiment-results')?.addEventListener('click', event => {
         const button = event.target.closest('.registry-add');
         if (button) registerModelCandidate(button);
+    });
+    document.querySelector('#model-registry-list')?.addEventListener('click', event => {
+        const button = event.target.closest('.registry-promote');
+        if (button) promoteModel(button);
     });
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();

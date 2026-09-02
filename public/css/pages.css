@@ -179,6 +179,8 @@
 .model-registry-list article span, .model-registry-list article p { display: block; margin: 4px 0 0; color: var(--muted); }
 .model-registry-list article p { grid-column: 1 / -1; }
 .model-registry-list em { font-style: normal; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.registry-state { display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+.registry-state .button { padding: 8px 11px; font-size: 12px; }
 .registry-ready { color: var(--lime); }
 .registry-blocked { color: var(--orange); }
 .registry-add { min-width: 116px; padding: 8px 10px; font-size: 12px; }

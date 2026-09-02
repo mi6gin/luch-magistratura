@@ -42,7 +42,11 @@ class ModelRegistryService
 
         $id = $experimentId.'--'.preg_replace('/[^a-z0-9_-]+/i', '-', $model);
         $folds = (int) ($experiment['rolling_folds'] ?? 1);
-        $runtimeCompatible = $model === 'seasonal-robust-v1';
+        $localDataset = ($experiment['dataset']['dataset'] ?? null) === 'Local Rayventory inventory';
+        $policyCompatible = in_array($model, ['adaptive_demand_router', 'risk_calibrated_router'], true)
+            && $this->validRoutes($result['routes'] ?? []);
+        $runtimeCompatible = $localDataset && $policyCompatible;
+        $artifact = $runtimeCompatible ? $this->packagePolicy($id, $experimentId, $model, $result['routes']) : null;
         $checks = [
             ['code' => 'rolling_folds', 'passed' => $folds >= 3, 'message' => "Rolling-окон: {$folds}; требуется минимум 3."],
             ['code' => 'finite_wape', 'passed' => is_numeric($result['metrics']['wape_pct'] ?? null) && is_finite((float) $result['metrics']['wape_pct']), 'message' => 'WAPE должен быть конечным числом.'],
@@ -50,7 +54,8 @@ class ModelRegistryService
         ];
         $candidate = [
             'id' => $id,
-            'name' => $model,
+            'name' => $runtimeCompatible ? 'local-demand-router-v1' : $model,
+            'source_model' => $model,
             'status' => 'candidate',
             'experiment_id' => $experimentId,
             'dataset' => $experiment['dataset']['dataset'] ?? 'Неизвестный набор',
@@ -58,6 +63,7 @@ class ModelRegistryService
             'metrics' => $result['metrics'] ?? [],
             'checks' => $checks,
             'eligible' => collect($checks)->every(fn (array $check): bool => $check['passed']),
+            'artifact_path' => $artifact,
         ];
 
         $state = $this->state();
@@ -119,6 +125,33 @@ class ModelRegistryService
         $temporary = $path.'.tmp-'.bin2hex(random_bytes(6));
         File::put($temporary, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), true);
         rename($temporary, $path);
+    }
+
+    private function validRoutes(array $routes): bool
+    {
+        if ($routes === []) {
+            return false;
+        }
+
+        return collect($routes)->every(fn (mixed $route): bool => is_string($route)
+            && preg_match('/^(seasonal_naive_7|moving_median_28|croston_sba)( × (?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/', $route) === 1);
+    }
+
+    private function packagePolicy(string $id, string $experimentId, string $sourceModel, array $routes): string
+    {
+        $directory = rtrim((string) config('rayventory.models_path', storage_path('app/models')), '/').'/'.$id;
+        File::ensureDirectoryExists($directory);
+        $path = $directory.'/manifest.json';
+        File::put($path, json_encode([
+            'schema_version' => 1,
+            'runtime' => 'local-demand-router-v1',
+            'experiment_id' => $experimentId,
+            'source_model' => $sourceModel,
+            'routes' => $routes,
+            'created_at' => now()->toIso8601String(),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), true);
+
+        return $path;
     }
 
     private function path(): string

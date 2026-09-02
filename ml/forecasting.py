@@ -13,6 +13,11 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+try:
+    from .runtime_policy import apply_active_policy
+except ImportError:
+    from runtime_policy import apply_active_policy
+
 
 MODEL_NAME = "seasonal-robust-v1"
 FORECAST_HORIZON = 30
@@ -556,6 +561,9 @@ def forecast_product(
     forecast_start = max(today, last_sale + pd.Timedelta(days=1))
     dates = pd.date_range(forecast_start, periods=horizon, freq="D")
     projection, profile, warnings = _project_dates(history, dates, strategy, overrides)
+    projection, runtime_model, policy_warning = apply_active_policy(history, projection)
+    if policy_warning:
+        warnings.append(policy_warning)
 
     stale_days = max((today - last_sale).days, 0)
     if stale_days > STALE_AFTER_DAYS:
@@ -598,7 +606,7 @@ def forecast_product(
         "forecast_start": dates[0].date().isoformat(),
         "forecast_end": dates[-1].date().isoformat(),
         "data_as_of": last_sale.date().isoformat(),
-        "model": MODEL_NAME,
+        "model": runtime_model,
         "quality": quality,
         "warnings": _dedupe_warnings([*data.get("warnings", []), *warnings]),
         "diagnostics": {
