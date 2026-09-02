@@ -12,9 +12,9 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from research.data import prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
-from research.dataset import normalize_from_train
+from research.dataset import FEATURES, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
-from research.experiment import _aggregate, _croston_sba, _fold_manifest, seasonal_baseline
+from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, seasonal_baseline
 
 
 class ResearchPipelineTest(unittest.TestCase):
@@ -90,6 +90,19 @@ class ResearchPipelineTest(unittest.TestCase):
         _, scales = normalize_from_train(frame, "2024-01-10")
         self.assertEqual(scales.sales["sku"], 10)
         self.assertEqual(scales.price["sku"], 100)
+        normalized, _ = normalize_from_train(frame, "2024-01-10")
+        self.assertTrue(set(("sales_mean_7", "nonzero_rate_28", "days_since_sale_scaled")).issubset(FEATURES))
+        self.assertAlmostEqual(normalized.iloc[0]["sales_mean_7"], 1.0)
+
+    def test_adaptive_router_uses_validation_without_test_labels(self):
+        history = np.zeros((2, 90, len(FEATURES)), dtype=np.float32)
+        history[:, :, 0] = 2
+        validation_target = np.full((2, 28), 2, dtype=np.float32)
+        test_target = np.full((2, 28), 99, dtype=np.float32)
+        values = (history, validation_target, ["sku-a", "sku-b"])
+        result = adaptive_baseline(values, (history, test_target, ["sku-a", "sku-b"]), {"sku-a": 1, "sku-b": 1})
+        self.assertEqual(result["routes"]["smooth"], "seasonal_naive_7")
+        self.assertEqual(result["metrics"]["wape_pct"], 97.9798)
 
     def test_prepare_m5_creates_data_and_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:

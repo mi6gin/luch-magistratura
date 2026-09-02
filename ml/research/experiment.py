@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .dataset import load_experiment_data
-from .metrics import point_metrics, segment_metrics
+from .metrics import demand_type, point_metrics, segment_metrics
 from .trainer import TrainingConfig, evaluate_model, save_result, train_model
 
 
@@ -70,6 +70,38 @@ def croston_baseline(test, sales_scales: dict[str, float]) -> dict:
     return _baseline_result("croston_sba", prediction, test, sales_scales)
 
 
+def _baseline_predictions(values) -> dict[str, np.ndarray]:
+    x, y, _ = values
+    horizon = y.shape[1]
+    return {
+        "seasonal_naive_7": x[:, -7:, 0][:, np.arange(horizon) % 7],
+        "moving_median_28": np.repeat(np.median(x[:, -28:, 0], axis=1)[:, None], horizon, axis=1),
+        "croston_sba": np.repeat(np.asarray([_croston_sba(history) for history in x[..., 0]])[:, None], horizon, axis=1),
+    }
+
+
+def adaptive_baseline(validation, test, sales_scales: dict[str, float]) -> dict:
+    validation_predictions = _baseline_predictions(validation)
+    validation_labels = np.asarray([demand_type(history) for history in validation[0][..., 0]])
+    routes = {}
+    for label in ("smooth", "intermittent", "erratic", "lumpy"):
+        mask = validation_labels == label
+        if not np.any(mask):
+            continue
+        routes[label] = min(
+            validation_predictions,
+            key=lambda name: point_metrics(validation[1][mask], validation_predictions[name][mask])["wape_pct"],
+        )
+    test_predictions = _baseline_predictions(test)
+    test_labels = np.asarray([demand_type(history) for history in test[0][..., 0]])
+    prediction = np.zeros_like(test[1])
+    for index, label in enumerate(test_labels):
+        prediction[index] = test_predictions[routes.get(label, "moving_median_28")][index]
+    result = _baseline_result("adaptive_demand_router", prediction, test, sales_scales)
+    result["routes"] = routes
+    return result
+
+
 def _fold_manifest(base: dict, fold_index: int, fold_count: int, step_days: int = 28) -> dict:
     offset = (fold_count - fold_index - 1) * step_days
     test_end = pd.Timestamp(base["test_end"]) - pd.Timedelta(days=offset)
@@ -110,13 +142,23 @@ def _aggregate(results: list[dict]) -> list[dict]:
             }
             segments[segment]["windows"] = int(sum(item["windows"] for item in available))
         metrics["segments"] = segments
-        aggregated.append({
+        aggregate = {
             "model": name,
             "metrics": metrics,
             "training_seconds": round(sum(float(fold.get("training_seconds", 0)) for fold in folds), 3),
             "parameter_count": int(folds[-1].get("parameter_count", 0)),
             "folds_completed": len(folds),
-        })
+        }
+        route_names = sorted({segment for fold in folds for segment in fold.get("routes", {})})
+        if route_names:
+            aggregate["routes"] = {
+                segment: max(
+                    {fold["routes"][segment] for fold in folds if segment in fold.get("routes", {})},
+                    key=lambda candidate: sum(fold.get("routes", {}).get(segment) == candidate for fold in folds),
+                )
+                for segment in route_names
+            }
+        aggregated.append(aggregate)
     return aggregated
 
 
@@ -144,6 +186,7 @@ def run_experiment(
             seasonal_baseline(test, scales.sales),
             median_baseline(test, scales.sales),
             croston_baseline(test, scales.sales),
+            adaptive_baseline(validation, test, scales.sales),
         ]
         fold_dir = output_dir / f"fold-{fold_index + 1}"
         for name in models:

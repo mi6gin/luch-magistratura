@@ -564,7 +564,8 @@
         const segmentKeys = ['smooth', 'intermittent', 'erratic', 'lumpy'];
         document.querySelector('#experiment-segments').innerHTML = results.map(item => `<tr><td><b>${escapeHtml(item.model)}</b></td>${segmentKeys.map(key => {
             const segment = item.metrics?.segments?.[key];
-            return `<td>${segment ? `${Number(segment.wape_pct).toLocaleString('ru-RU')}% <span class="table-subline">${Number(segment.windows || 0).toLocaleString('ru-RU')} окон</span>` : 'н/д'}</td>`;
+            const route = item.routes?.[key];
+            return `<td>${segment ? `${Number(segment.wape_pct).toLocaleString('ru-RU')}% <span class="table-subline">${route ? `метод: ${escapeHtml(route)}` : `${Number(segment.windows || 0).toLocaleString('ru-RU')} окон`}</span>` : 'н/д'}</td>`;
         }).join('')}</tr>`).join('') || '<tr><td colspan="5">Сегментные метрики появятся после нового rolling-запуска.</td></tr>';
         const leader = results[0];
         document.querySelector('#experiment-note').textContent = Number(experiment.rolling_folds || 1) > 1

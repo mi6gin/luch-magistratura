@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 
 
-FEATURES = ("sales_scaled", "price_scaled", "wday_sin", "wday_cos", "month_sin", "month_cos", "is_event", "snap")
+FEATURES = (
+    "sales_scaled", "price_scaled", "wday_sin", "wday_cos", "month_sin", "month_cos",
+    "is_event", "snap", "sale_observed", "sales_mean_7", "sales_mean_28",
+    "sales_std_28", "nonzero_rate_28", "days_since_sale_scaled",
+)
 
 
 @dataclass(frozen=True)
@@ -29,7 +33,27 @@ def normalize_from_train(frame: pd.DataFrame, train_end: str) -> tuple[pd.DataFr
     data["wday_cos"] = np.cos(2 * np.pi * (data["wday"] - 1) / 7)
     data["month_sin"] = np.sin(2 * np.pi * (data["month"] - 1) / 12)
     data["month_cos"] = np.cos(2 * np.pi * (data["month"] - 1) / 12)
+    groups = data.groupby("id", sort=False, observed=True)["sales_scaled"]
+    data["sale_observed"] = (data["sales"] > 0).astype(float)
+    data["sales_mean_7"] = groups.transform(lambda values: values.rolling(7, min_periods=1).mean())
+    data["sales_mean_28"] = groups.transform(lambda values: values.rolling(28, min_periods=1).mean())
+    data["sales_std_28"] = groups.transform(lambda values: values.rolling(28, min_periods=2).std()).fillna(0)
+    data["nonzero_rate_28"] = data.groupby("id", sort=False, observed=True)["sale_observed"].transform(
+        lambda values: values.rolling(28, min_periods=1).mean()
+    )
+    data["days_since_sale_scaled"] = data.groupby("id", sort=False, observed=True)["sale_observed"].transform(
+        _days_since_sale
+    ) / 90
     return data, SeriesScales(sales=sales_scales, price=price_scales)
+
+
+def _days_since_sale(observed: pd.Series) -> pd.Series:
+    elapsed = 90
+    result = []
+    for value in observed:
+        elapsed = 0 if value > 0 else min(elapsed + 1, 90)
+        result.append(elapsed)
+    return pd.Series(result, index=observed.index, dtype=float)
 
 
 def make_windows(
@@ -70,4 +94,3 @@ def load_experiment_data(path: str, manifest: dict, history_days: int = 90, hori
     test_start = (pd.Timestamp(manifest["validation_end"]) + pd.Timedelta(days=1)).date().isoformat()
     test = make_windows(normalized, test_start, manifest["test_end"], history_days, horizon_days, stride=1)
     return frame, scales, train, validation, test
-
