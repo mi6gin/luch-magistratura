@@ -61,6 +61,7 @@ Artisan::command('rayventory:cleanup', function (): int {
     $removed += $removeOlderThan('reports', now()->subDays(30)->getTimestamp());
     $removed += $removeOlderThan('import-history', now()->subYear()->getTimestamp());
     $removed += $removeOlderThan('model-health', now()->subYear()->getTimestamp());
+    $removed += $removeOlderThan('training-jobs', now()->subDays(30)->getTimestamp());
 
     $backupDirectory = storage_path('app/import-backups');
     if (File::isDirectory($backupDirectory)) {

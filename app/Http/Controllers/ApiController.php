@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\WarehouseStock;
 use App\Services\InventoryExcelService;
+use App\Services\LocalModelPipelineService;
 use App\Services\LocalTrainingService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
@@ -25,6 +26,7 @@ class ApiController extends Controller
         private readonly ResearchExperimentService $experiments,
         private readonly ModelRegistryService $models,
         private readonly LocalTrainingService $localTraining,
+        private readonly LocalModelPipelineService $localPipeline,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -83,6 +85,7 @@ class ApiController extends Controller
         } else {
             $adaptationWarning = 'Данные импортированы, но автоматическая оценка модели не завершилась. Запустите её на экране здоровья модели.';
         }
+        $training = $this->localPipeline->schedule('excel_import');
 
         return response()->json([
             'success' => true,
@@ -90,6 +93,7 @@ class ApiController extends Controller
             'counts' => $counts,
             'adaptation' => $adaptation,
             'warning' => $adaptationWarning,
+            'training' => $training,
         ]);
     }
 
@@ -128,6 +132,18 @@ class ApiController extends Controller
     public function trainingReadiness(): JsonResponse
     {
         return response()->json($this->localTraining->readiness());
+    }
+
+    public function trainingPipeline(): JsonResponse
+    {
+        return response()->json(['latest' => $this->localPipeline->latest()]);
+    }
+
+    public function startTrainingPipeline(): JsonResponse
+    {
+        $status = $this->localPipeline->schedule('manual');
+
+        return response()->json(['success' => true, 'pipeline' => $status], $status['status'] === 'queued' ? 202 : 200);
     }
 
     public function registerModelCandidate(Request $request): JsonResponse

@@ -115,8 +115,11 @@ class ApplicationTest extends TestCase
             'dataset' => ['dataset' => 'Local Rayventory inventory'],
             'rolling_folds' => 3,
             'results' => [[
+                'model' => 'moving_median_28',
+                'metrics' => ['wape_pct' => 20.0, 'risk_cost_pct' => 25.0],
+            ], [
                 'model' => 'risk_calibrated_router',
-                'metrics' => ['wape_pct' => 18.2],
+                'metrics' => ['wape_pct' => 18.2, 'risk_cost_pct' => 22.0],
                 'routes' => ['smooth' => 'moving_median_28 × 1.25'],
             ]],
         ], JSON_THROW_ON_ERROR));
@@ -136,6 +139,8 @@ class ApplicationTest extends TestCase
 
     public function test_local_training_readiness_explains_insufficient_history(): void
     {
+        $directory = sys_get_temp_dir().'/rayventory-training-jobs-'.bin2hex(random_bytes(5));
+        config(['rayventory.training_jobs_path' => $directory]);
         Schema::create('sales_history', function (Blueprint $table): void {
             $table->unsignedBigInteger('product_id');
             $table->date('sale_date');
@@ -150,6 +155,11 @@ class ApplicationTest extends TestCase
             ->assertJsonPath('series_eligible', 0)
             ->assertJsonPath('minimum_series_span_days', 30)
             ->assertJsonPath('minimum_days', 175);
+        $this->postJson('/api/training-pipeline')->assertOk()
+            ->assertJsonPath('pipeline.status', 'skipped');
+        $this->getJson('/api/training-pipeline')->assertOk()
+            ->assertJsonPath('latest.status', 'skipped');
+        File::deleteDirectory($directory);
     }
 
     public function test_inventory_import_requires_an_xlsx_file(): void

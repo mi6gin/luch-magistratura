@@ -165,6 +165,7 @@
 .training-readiness-grid span, .training-readiness-grid b { display: block; }
 .training-readiness-grid span { margin-bottom: 7px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .training-readiness-grid b { font-size: 20px; }
+.training-actions { display: flex; align-items: center; gap: 10px; }
 .experiment-panel { min-width: 0; }
 .experiment-panel .table-scroll { max-width: 100%; overflow-x: auto; }
 .experiment-table { min-width: 1040px; }

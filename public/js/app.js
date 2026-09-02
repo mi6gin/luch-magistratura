@@ -612,6 +612,28 @@
         document.querySelector('#training-span').textContent = `${Number(data.minimum_series_span_days).toLocaleString('ru-RU')} дней`;
         document.querySelector('#training-series').textContent = `${Number(data.series_eligible).toLocaleString('ru-RU')} / ${Number(data.series_total).toLocaleString('ru-RU')}`;
         document.querySelector('#training-message').textContent = data.message;
+        document.querySelector('#start-local-training').disabled = !data.ready;
+    }
+
+    async function loadTrainingPipeline() {
+        const data = await api('training-pipeline');
+        const latest = data.latest;
+        document.querySelector('#training-pipeline-status').textContent = latest
+            ? `${latest.status} · ${latest.message}`
+            : 'Автоматические запуски ещё не выполнялись.';
+    }
+
+    async function startLocalTraining(button) {
+        setButtonLoading(button, true);
+        try {
+            const data = await api('training-pipeline', { method: 'POST', body: '{}' });
+            document.querySelector('#training-pipeline-status').textContent = `${data.pipeline.status} · ${data.pipeline.message}`;
+            toast(data.pipeline.message);
+        } catch (error) {
+            toast(error.message || 'Не удалось запустить локальный эксперимент', 'error');
+        } finally {
+            setButtonLoading(button, false);
+        }
     }
 
     async function registerModelCandidate(button) {
@@ -1034,6 +1056,7 @@
         const button = event.target.closest('.registry-promote');
         if (button) promoteModel(button);
     });
+    document.querySelector('#start-local-training')?.addEventListener('click', event => startLocalTraining(event.currentTarget));
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();
     });
@@ -1157,5 +1180,6 @@
         loadExperiments();
         loadModelRegistry().catch(error => toast(error.message, 'error'));
         loadTrainingReadiness().catch(error => toast(error.message, 'error'));
+        loadTrainingPipeline().catch(error => toast(error.message, 'error'));
     }
 })();

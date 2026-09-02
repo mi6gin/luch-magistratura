@@ -33,11 +33,12 @@ def main() -> None:
     train.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
     train.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
     train.add_argument("--output", type=Path, default=Path("storage/app/experiments"))
-    train.add_argument("--models", nargs="+", choices=["lstm", "gru", "transformer"], default=["lstm", "gru", "transformer"])
+    train.add_argument("--models", nargs="*", choices=["lstm", "gru", "transformer"], default=["lstm", "gru", "transformer"])
     train.add_argument("--epochs", type=int, default=100)
     train.add_argument("--patience", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--folds", type=int, choices=range(1, 7), default=3)
+    train.add_argument("--summary", action="store_true", help="Print a compact result instead of the full experiment document")
     args = parser.parse_args()
 
     if args.action == "prepare-m5":
@@ -49,7 +50,13 @@ def main() -> None:
     elif args.action == "train":
         config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
         result = run_experiment(args.data, args.manifest, args.output, args.models, config, folds=args.folds)
-        print(json.dumps(result, ensure_ascii=False))
+        output = {
+            "success": True,
+            "experiment_id": result["experiment_id"],
+            "champion": result["champion"],
+            "ranking": result["ranking"],
+        } if args.summary else result
+        print(json.dumps(output, ensure_ascii=False))
 
 
 if __name__ == "__main__":

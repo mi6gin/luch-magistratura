@@ -16,6 +16,8 @@ Route::get('experiments', [ApiController::class, 'experiments']);
 Route::get('experiments/{id}', [ApiController::class, 'experiment'])->where('id', 'EXP-[A-Z0-9-]+');
 Route::get('models', [ApiController::class, 'models']);
 Route::get('training-readiness', [ApiController::class, 'trainingReadiness']);
+Route::get('training-pipeline', [ApiController::class, 'trainingPipeline']);
+Route::post('training-pipeline', [ApiController::class, 'startTrainingPipeline']);
 Route::post('models/candidates', [ApiController::class, 'registerModelCandidate']);
 Route::post('models/{id}/promote', [ApiController::class, 'promoteModel'])->where('id', '[A-Za-z0-9_-]+(?:--[A-Za-z0-9_-]+)?');
 Route::post('simulate', [ApiController::class, 'simulate']);

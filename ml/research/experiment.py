@@ -199,8 +199,6 @@ def run_experiment(
     config: TrainingConfig,
     folds: int = 1,
 ) -> dict:
-    import torch
-
     if folds < 1 or folds > 6:
         raise ValueError("Количество rolling-окон должно быть от 1 до 6.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -234,6 +232,10 @@ def run_experiment(
         })
     results = _aggregate(fold_results)
     ranked = sorted(results, key=lambda item: item["metrics"]["wape_pct"])
+    pytorch_version = None
+    if models:
+        import torch
+        pytorch_version = torch.__version__
     document = {
         "experiment_id": experiment_id,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -241,7 +243,7 @@ def run_experiment(
         "config": config.__dict__,
         "environment": {
             "python": sys.version.split()[0],
-            "pytorch": torch.__version__,
+            "pytorch": pytorch_version,
             "platform": platform.platform(),
         },
         "results": results,

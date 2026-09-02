@@ -46,10 +46,12 @@ class ModelRegistryService
         $policyCompatible = in_array($model, ['adaptive_demand_router', 'risk_calibrated_router'], true)
             && $this->validRoutes($result['routes'] ?? []);
         $runtimeCompatible = $localDataset && $policyCompatible;
+        $qualityGate = $this->qualityGate($model, $result, $experiment['results'] ?? []);
         $artifact = $runtimeCompatible ? $this->packagePolicy($id, $experimentId, $model, $result['routes']) : null;
         $checks = [
             ['code' => 'rolling_folds', 'passed' => $folds >= 3, 'message' => "Rolling-окон: {$folds}; требуется минимум 3."],
             ['code' => 'finite_wape', 'passed' => is_numeric($result['metrics']['wape_pct'] ?? null) && is_finite((float) $result['metrics']['wape_pct']), 'message' => 'WAPE должен быть конечным числом.'],
+            ['code' => 'beats_baseline', 'passed' => $qualityGate['passed'], 'message' => $qualityGate['message']],
             ['code' => 'runtime_compatible', 'passed' => $runtimeCompatible, 'message' => $runtimeCompatible ? 'Артефакт поддерживается production runtime.' : 'Исследовательский артефакт пока не поддерживается production runtime.'],
         ];
         $candidate = [
@@ -135,6 +137,27 @@ class ModelRegistryService
 
         return collect($routes)->every(fn (mixed $route): bool => is_string($route)
             && preg_match('/^(seasonal_naive_7|moving_median_28|croston_sba)( × (?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/', $route) === 1);
+    }
+
+    private function qualityGate(string $model, array $result, array $results): array
+    {
+        $metric = $model === 'risk_calibrated_router' ? 'risk_cost_pct' : 'wape_pct';
+        $references = collect($results)->whereIn('model', [
+            'seasonal_naive_7', 'moving_median_28', 'croston_sba',
+        ])->pluck("metrics.{$metric}")->filter(fn (mixed $value): bool => is_numeric($value))->map(fn (mixed $value): float => (float) $value);
+        $candidate = $result['metrics'][$metric] ?? null;
+        if (! is_numeric($candidate) || $references->isEmpty()) {
+            return ['passed' => false, 'message' => "Нельзя проверить {$metric}: отсутствует кандидат или baseline."];
+        }
+        $reference = (float) $references->min();
+        $passed = (float) $candidate <= $reference;
+
+        return [
+            'passed' => $passed,
+            'message' => $passed
+                ? sprintf('%s %.2f не хуже лучшего baseline %.2f.', $metric, $candidate, $reference)
+                : sprintf('%s %.2f хуже лучшего baseline %.2f.', $metric, $candidate, $reference),
+        ];
     }
 
     private function packagePolicy(string $id, string $experimentId, string $sourceModel, array $routes): string
