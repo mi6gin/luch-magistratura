@@ -13,6 +13,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
+from research.analysis import analyze_dataset
 from research.dataset import FEATURES, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
 from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, risk_calibrated_baseline, seasonal_baseline
@@ -217,6 +218,11 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(manifest.history_days, 200)
             self.assertEqual(len(prepared), 200)
             self.assertEqual(database.read_bytes(), before)
+            analysis = analyze_dataset(root / "output/local_inventory.csv.gz", root / "output/manifest.json")
+            self.assertEqual(analysis["volume"]["series"], 1)
+            self.assertEqual(analysis["period"]["days"], 200)
+            self.assertIn("weekly_lag_correlation", analysis["patterns"])
+            self.assertIn(analysis["series_preview"][0]["demand_type"], {"smooth", "intermittent", "erratic", "lumpy"})
 
 
 if __name__ == "__main__":

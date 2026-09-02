@@ -623,6 +623,20 @@
             : 'Автоматические запуски ещё не выполнялись.';
     }
 
+    async function loadDatasetAnalysis() {
+        const data = await api('dataset-analysis');
+        const analysis = data.analysis;
+        if (!analysis) return;
+        document.querySelector('#analysis-meta').textContent = `${analysis.dataset} · ${Number(analysis.volume.rows).toLocaleString('ru-RU')} строк · ${analysis.period.days} дней`;
+        document.querySelector('#analysis-zero').textContent = `${Number(analysis.demand.zero_sales_pct).toLocaleString('ru-RU')}%`;
+        document.querySelector('#analysis-weekly').textContent = analysis.patterns.weekly_lag_correlation === null ? 'н/д' : Number(analysis.patterns.weekly_lag_correlation).toLocaleString('ru-RU');
+        document.querySelector('#analysis-trend').textContent = `${Number(analysis.patterns.portfolio_trend_30d_pct).toLocaleString('ru-RU')}%`;
+        const labels = { smooth: 'Стабильный', intermittent: 'Прерывистый', erratic: 'Хаотичный', lumpy: 'Нерегулярный' };
+        document.querySelector('#analysis-types').innerHTML = Object.entries(labels).map(([key, label]) => `<article><span>${label}</span><b>${Number(analysis.demand.types[key] || 0).toLocaleString('ru-RU')} SKU</b></article>`).join('');
+        const dominant = Object.entries(analysis.demand.types).sort((a, b) => b[1] - a[1])[0];
+        document.querySelector('#analysis-conclusion').textContent = `Преобладающий тип спроса: ${labels[dominant?.[0]] || 'не определён'}. Анализ выполнен за ${Number(analysis.performance.analysis_seconds).toLocaleString('ru-RU')} сек.`;
+    }
+
     async function startLocalTraining(button) {
         setButtonLoading(button, true);
         try {
@@ -1181,5 +1195,6 @@
         loadModelRegistry().catch(error => toast(error.message, 'error'));
         loadTrainingReadiness().catch(error => toast(error.message, 'error'));
         loadTrainingPipeline().catch(error => toast(error.message, 'error'));
+        loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
     }
 })();

@@ -160,6 +160,11 @@
 .experiment-summary .metric-card { min-width: 0; }
 .experiment-summary .metric-card strong { overflow: hidden; font-size: clamp(20px, 2vw, 28px); text-overflow: ellipsis; white-space: nowrap; }
 .local-training-panel { margin-bottom: 22px; }
+.dataset-analysis-panel { margin-bottom: 22px; }
+.demand-type-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.demand-type-grid article { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.demand-type-grid span, .demand-type-grid b { display: block; }
+.demand-type-grid span { color: var(--muted); font-size: 12px; }
 .training-readiness-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .training-readiness-grid article { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
 .training-readiness-grid span, .training-readiness-grid b { display: block; }
@@ -188,3 +193,4 @@
 @media (max-width: 900px) { .experiment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .experiment-panel .panel-header { align-items: stretch; flex-direction: column; } }
 @media (max-width: 520px) { .experiment-summary { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .training-readiness-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .demand-type-grid { grid-template-columns: repeat(2, 1fr); } }

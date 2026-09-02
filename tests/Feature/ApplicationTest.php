@@ -162,6 +162,25 @@ class ApplicationTest extends TestCase
         File::deleteDirectory($directory);
     }
 
+    public function test_dataset_analysis_api_returns_latest_eda_profile(): void
+    {
+        $path = sys_get_temp_dir().'/rayventory-analysis-'.bin2hex(random_bytes(5)).'.json';
+        config(['rayventory.dataset_analysis_path' => $path]);
+        File::put($path, json_encode([
+            'dataset' => 'Local Rayventory inventory',
+            'volume' => ['series' => 3, 'rows' => 1095],
+            'period' => ['days' => 365],
+            'demand' => ['zero_sales_pct' => 12.5],
+        ], JSON_THROW_ON_ERROR));
+        try {
+            $this->getJson('/api/dataset-analysis')->assertOk()
+                ->assertJsonPath('analysis.volume.rows', 1095)
+                ->assertJsonPath('analysis.period.days', 365);
+        } finally {
+            File::delete($path);
+        }
+    }
+
     public function test_inventory_import_requires_an_xlsx_file(): void
     {
         $this->postJson('/api/inventory/import/preview')->assertUnprocessable()

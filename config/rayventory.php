@@ -15,5 +15,6 @@ return [
     'research_python' => env('ML_RESEARCH_PYTHON') ?: env('ML_PYTHON', 'py'),
     'training_timeout' => env('ML_TRAINING_TIMEOUT', 3600),
     'local_training_data_path' => env('ML_LOCAL_DATA_PATH') ?: base_path('data/processed/local-inventory'),
+    'dataset_analysis_path' => env('ML_DATASET_ANALYSIS_PATH') ?: storage_path('app/dataset-analysis/latest.json'),
     'timeout' => env('ML_TIMEOUT', 120),
 ];

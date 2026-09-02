@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\WarehouseStock;
+use App\Services\DatasetAnalysisService;
 use App\Services\InventoryExcelService;
 use App\Services\LocalModelPipelineService;
 use App\Services\LocalTrainingService;
@@ -27,6 +28,7 @@ class ApiController extends Controller
         private readonly ModelRegistryService $models,
         private readonly LocalTrainingService $localTraining,
         private readonly LocalModelPipelineService $localPipeline,
+        private readonly DatasetAnalysisService $datasetAnalysis,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -137,6 +139,11 @@ class ApiController extends Controller
     public function trainingPipeline(): JsonResponse
     {
         return response()->json(['latest' => $this->localPipeline->latest()]);
+    }
+
+    public function datasetAnalysis(): JsonResponse
+    {
+        return response()->json(['analysis' => $this->datasetAnalysis->latest()]);
     }
 
     public function startTrainingPipeline(): JsonResponse

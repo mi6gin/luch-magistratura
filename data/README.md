@@ -7,6 +7,9 @@
 
 ```bash
 .venv-ml/bin/python ml/research_cli.py prepare-local
+.venv-ml/bin/python ml/research_cli.py analyze \
+  --data data/processed/local-inventory/local_inventory.csv.gz \
+  --manifest data/processed/local-inventory/manifest.json
 .venv-ml/bin/python ml/research_cli.py train \
   --data data/processed/local-inventory/local_inventory.csv.gz \
   --manifest data/processed/local-inventory/manifest.json

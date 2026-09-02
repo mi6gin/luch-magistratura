@@ -188,6 +188,9 @@ curl -L -o /tmp/online-retail-ii.zip "https://archive.ics.uci.edu/static/public/
 mkdir -p data/raw/uci-online-retail
 unzip /tmp/online-retail-ii.zip -d data/raw/uci-online-retail
 .venv-ml/bin/python ml/research_cli.py prepare-uci --series 300 --seed 42
+.venv-ml/bin/python ml/research_cli.py analyze \
+  --data data/processed/uci-online-retail/uci_online_retail_subset.csv.gz \
+  --manifest data/processed/uci-online-retail/manifest.json
 ```
 
 После подготовки запускается единый эксперимент:
@@ -195,6 +198,13 @@ unzip /tmp/online-retail-ii.zip -d data/raw/uci-online-retail
 ```bash
 .venv-ml/bin/python ml/research_cli.py train
 ```
+
+Команда `analyze` формирует воспроизводимый EDA-профиль: качество и объём данных,
+долю нулевого спроса, распределение Syntetos–Boylan, недельную автокорреляцию,
+портфельный тренд, эффект событий и промо, связь цены со спросом и время обработки.
+Результат сохраняется в `storage/app/dataset-analysis/latest.json` и отображается
+на `/experiments`. Это связывает выбор архитектуры с характеристиками данных,
+как требуется планом исследования.
 
 Он сравнивает три понятных baseline (`seasonal naive`, медиана за 28 дней и
 Croston-SBA для прерывистого спроса), адаптивный выбор baseline, калибровку риска и нейронные
@@ -275,7 +285,7 @@ production-версия переводится в `archived`, поэтому и�
 4. упаковывает `risk_calibrated_router` и регистрирует его как candidate;
 5. оставляет публикацию за явным подтверждением пользователя.
 
-Статусы `queued`, `preparing`, `evaluating`, `review_required`, `blocked`,
+Статусы `queued`, `preparing`, `analyzing`, `evaluating`, `review_required`, `blocked`,
 `skipped` и `failed` отображаются на `/experiments`. Повторный запуск не создаётся,
 пока предыдущий активен. Нейросетевые эксперименты остаются отдельным более
 тяжёлым исследовательским процессом и не задерживают импорт.
@@ -443,6 +453,7 @@ Excel-заказ содержит листы `Сводка` и `Заказ`. К�
 - `ML_MODELS_PATH` — каталог версионированных production-артефактов;
 - `ML_RESEARCH_PYTHON` — Python для локального исследовательского конвейера;
 - `ML_LOCAL_DATA_PATH` — каталог приватного производного набора;
+- `ML_DATASET_ANALYSIS_PATH` — последний воспроизводимый EDA-профиль;
 - `ML_TRAINING_TIMEOUT` — максимальное время фонового эксперимента;
 - `ML_TIMEOUT` — таймаут Python-процесса в секундах.
 
@@ -460,6 +471,7 @@ Excel-заказ содержит листы `Сводка` и `Заказ`. К�
 - `GET /api/models` — production-модель и зарегистрированные кандидаты;
 - `GET /api/training-readiness` — готовность локальной истории к ML-эксперименту;
 - `GET /api/training-pipeline` — состояние последнего автоматического запуска;
+- `GET /api/dataset-analysis` — последний профиль исследовательского набора;
 - `POST /api/training-pipeline` — ручной запуск локального конвейера;
 - `POST /api/models/candidates` — регистрация результата эксперимента;
 - `POST /api/models/{id}/promote` — публикация прошедшего проверки кандидата;

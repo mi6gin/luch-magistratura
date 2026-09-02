@@ -18,7 +18,7 @@ class LocalModelPipelineService
     public function schedule(string $trigger = 'manual'): array
     {
         $latest = $this->latest();
-        if (in_array($latest['status'] ?? null, ['queued', 'preparing', 'evaluating'], true)) {
+        if (in_array($latest['status'] ?? null, ['queued', 'preparing', 'analyzing', 'evaluating'], true)) {
             return $latest;
         }
         $readiness = $this->training->readiness();
@@ -53,6 +53,12 @@ class LocalModelPipelineService
             $this->run([
                 'prepare-local', '--database', (string) config('rayventory.database_path'),
                 '--output-dir', $dataDirectory,
+            ]);
+            $status = $this->update($status, 'analyzing', 'Анализируем спрос, сезонность и внешние факторы.');
+            $this->run([
+                'analyze', '--data', $dataDirectory.'/local_inventory.csv.gz',
+                '--manifest', $dataDirectory.'/manifest.json',
+                '--output', (string) config('rayventory.dataset_analysis_path'),
             ]);
             $status = $this->update($status, 'evaluating', 'Сравниваем безопасные методы на rolling-окнах.');
             $result = $this->run([
