@@ -198,6 +198,20 @@ Loss и early stopping. Результат содержит среднее и с
 loss по эпохам, веса, параметры и версии окружения и сохраняется в
 `storage/app/experiments/EXP-*/`.
 
+Для эксперимента на собственных импортированных данных вместо UCI выполните:
+
+```bash
+.venv-ml/bin/python ml/research_cli.py prepare-local
+.venv-ml/bin/python ml/research_cli.py train \
+  --data data/processed/local-inventory/local_inventory.csv.gz \
+  --manifest data/processed/local-inventory/manifest.json
+```
+
+База открывается только для чтения, а производный набор остаётся в локальном
+каталоге, исключённом из Git. Экран `/experiments` заранее показывает период,
+число готовых SKU и недостающую глубину истории. Минимум — 175 дней, рекомендуемый
+период — 365 дней.
+
 Вход нейросети включает продажи и цену, календарные признаки, rolling-средние за
 7 и 28 дней, rolling-разброс, долю дней с продажами и время с последней продажи.
 Все rolling-признаки строятся только из доступной на момент прогноза истории.
@@ -411,6 +425,7 @@ Excel-заказ содержит листы `Сводка` и `Заказ`. К�
 - `POST /api/simulate` — синхронный прогноз SKU;
 - `POST /api/generate-report` — создание PDF/PPTX;
 - `GET /api/models` — production-модель и зарегистрированные кандидаты;
+- `GET /api/training-readiness` — готовность локальной истории к ML-эксперименту;
 - `POST /api/models/candidates` — регистрация результата эксперимента;
 - `POST /api/models/{id}/promote` — публикация прошедшего проверки кандидата;
 - `GET /download/reports/{filename}` — безопасное скачивание отчёта.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from research.data import prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
+from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.dataset import FEATURES, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
 from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, risk_calibrated_baseline, seasonal_baseline
@@ -196,6 +197,26 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(manifest.row_count, 360)
             self.assertGreater(prepared["sales"].min(), -1)
             self.assertNotIn(-100, prepared["sales"].tolist())
+
+    def test_prepare_local_inventory_reads_sqlite_without_mutating_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "inventory.db"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, name TEXT, category TEXT, unit_price REAL)")
+                connection.execute("CREATE TABLE sales_history (product_id INTEGER, sale_date TEXT, quantity_sold INTEGER, in_stock INTEGER, is_holiday INTEGER, is_promo INTEGER)")
+                connection.execute("INSERT INTO products VALUES (1, 'SKU-1', 'Товар', 'Тест', 100)")
+                connection.executemany(
+                    "INSERT INTO sales_history VALUES (1, ?, ?, 1, 0, 0)",
+                    [(date.date().isoformat(), index % 5) for index, date in enumerate(pd.date_range("2024-01-01", periods=200))],
+                )
+            before = database.read_bytes()
+            manifest = prepare_local_inventory(database, root / "output")
+            prepared = pd.read_csv(root / "output/local_inventory.csv.gz")
+            self.assertEqual(manifest.series_count, 1)
+            self.assertEqual(manifest.history_days, 200)
+            self.assertEqual(len(prepared), 200)
+            self.assertEqual(database.read_bytes(), before)
 
 
 if __name__ == "__main__":

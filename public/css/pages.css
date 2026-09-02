@@ -159,6 +159,12 @@
 .experiment-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .experiment-summary .metric-card { min-width: 0; }
 .experiment-summary .metric-card strong { overflow: hidden; font-size: clamp(20px, 2vw, 28px); text-overflow: ellipsis; white-space: nowrap; }
+.local-training-panel { margin-bottom: 22px; }
+.training-readiness-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.training-readiness-grid article { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.training-readiness-grid span, .training-readiness-grid b { display: block; }
+.training-readiness-grid span { margin-bottom: 7px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.training-readiness-grid b { font-size: 20px; }
 .experiment-panel { min-width: 0; }
 .experiment-panel .table-scroll { max-width: 100%; overflow-x: auto; }
 .experiment-table { min-width: 1040px; }
@@ -178,3 +184,4 @@
 .registry-add { min-width: 116px; padding: 8px 10px; font-size: 12px; }
 @media (max-width: 900px) { .experiment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .experiment-panel .panel-header { align-items: stretch; flex-direction: column; } }
 @media (max-width: 520px) { .experiment-summary { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .training-readiness-grid { grid-template-columns: 1fr; } }

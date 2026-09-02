@@ -1,5 +1,22 @@
 # Исследовательские данные
 
+## Приватный набор из рабочей базы
+
+После импорта пользовательского Excel набор для эксперимента создаётся полностью
+локально:
+
+```bash
+.venv-ml/bin/python ml/research_cli.py prepare-local
+.venv-ml/bin/python ml/research_cli.py train \
+  --data data/processed/local-inventory/local_inventory.csv.gz \
+  --manifest data/processed/local-inventory/manifest.json
+```
+
+Первая команда открывает SQLite только для чтения, формирует непрерывные дневные
+ряды и сохраняет их в игнорируемом Git каталоге `data/processed/local-inventory`.
+В манифест попадает короткий SHA-256 fingerprint базы, но не её содержимое и не
+абсолютный путь. Нужны минимум 175 дней истории; рекомендуется 365 дней.
+
 ## Основной набор: UCI Online Retail II
 
 Основной контур использует открытый набор

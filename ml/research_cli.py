@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from research.data import prepare_m5, prepare_uci_online_retail
+from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail
 from research.experiment import run_experiment
 from research.trainer import TrainingConfig
 
@@ -23,6 +24,11 @@ def main() -> None:
     prepare_uci.add_argument("--output-dir", type=Path, default=Path("data/processed/uci-online-retail"))
     prepare_uci.add_argument("--series", type=int, default=300)
     prepare_uci.add_argument("--seed", type=int, default=42)
+    prepare_local = subparsers.add_parser("prepare-local", help="Prepare private training data from the local SQLite database")
+    prepare_local.add_argument("--database", type=Path, default=Path("storage/app/rayventory/inventory_forecast.db"))
+    prepare_local.add_argument("--output-dir", type=Path, default=Path("data/processed/local-inventory"))
+    prepare_local.add_argument("--series", type=int, default=1000)
+    prepare_local.add_argument("--seed", type=int, default=42)
     train = subparsers.add_parser("train", help="Compare demand-aware baselines, LSTM, GRU and Transformer")
     train.add_argument("--data", type=Path, default=Path("data/processed/uci-online-retail/uci_online_retail_subset.csv.gz"))
     train.add_argument("--manifest", type=Path, default=Path("data/processed/uci-online-retail/manifest.json"))
@@ -38,6 +44,8 @@ def main() -> None:
         print(json.dumps(asdict(prepare_m5(args.raw_dir, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "prepare-uci":
         print(json.dumps(asdict(prepare_uci_online_retail(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
+    elif args.action == "prepare-local":
+        print(json.dumps(asdict(prepare_local_inventory(args.database, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "train":
         config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
         result = run_experiment(args.data, args.manifest, args.output, args.models, config, folds=args.folds)
@@ -45,4 +53,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exception:
+        print(json.dumps({"success": False, "error": str(exception)}, ensure_ascii=False))
+        raise SystemExit(1) from None

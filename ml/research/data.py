@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -185,6 +186,80 @@ def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int 
     manifest = DatasetManifest(
         dataset="UCI Online Retail II",
         source="https://doi.org/10.24432/C5CG6D",
+        seed=seed,
+        series_count=int(output["id"].nunique()),
+        row_count=len(output),
+        date_start=output["date"].min().date().isoformat(),
+        date_end=output["date"].max().date().isoformat(),
+        history_days=int(output["date"].nunique()),
+        horizon_days=28,
+        train_end=bounds["train_end"],
+        validation_end=bounds["validation_end"],
+        test_end=bounds["test_end"],
+        files={"data": data_path.name},
+    )
+    (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
+
+
+def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int = 1000, seed: int = SEED) -> DatasetManifest:
+    """Build a research dataset from the user's local SQLite database only."""
+    if not database.is_file():
+        raise FileNotFoundError(f"Локальная SQLite-база не найдена: {database}")
+    with sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"products", "sales_history"}.issubset(tables):
+            raise ValueError("В базе необходимы таблицы products и sales_history.")
+        products = pd.read_sql_query(
+            "SELECT id, COALESCE(sku, '') AS sku, name, category, unit_price FROM products",
+            connection,
+        )
+        sales = pd.read_sql_query(
+            "SELECT product_id, sale_date, quantity_sold, in_stock, is_holiday, is_promo FROM sales_history",
+            connection,
+        )
+    if products.empty or sales.empty:
+        raise ValueError("Для локального обучения нужны товары и история продаж.")
+    sales["date"] = pd.to_datetime(sales["sale_date"], errors="coerce").dt.normalize()
+    sales["sales"] = pd.to_numeric(sales["quantity_sold"], errors="coerce").fillna(0).clip(lower=0)
+    sales = sales.dropna(subset=["date"])
+    known = set(pd.to_numeric(products["id"], errors="coerce").dropna().astype(int))
+    sales = sales.loc[pd.to_numeric(sales["product_id"], errors="coerce").isin(known)].copy()
+    if sales.empty:
+        raise ValueError("После проверки дат и товаров не осталось локальных продаж.")
+    sales["product_id"] = sales["product_id"].astype(int)
+    profile = products.loc[products["id"].isin(sales["product_id"].unique())].copy()
+    profile["id"] = profile["id"].astype(int).map(lambda value: f"product-{value}")
+    profile["dept_id"] = profile["category"].fillna("Без категории").astype(str)
+    profile["store_id"] = "local"
+    selected = select_series(profile[["id", "dept_id", "store_id"]], min(series_limit, len(profile)), seed)
+    selected_product_ids = selected["id"].str.removeprefix("product-").astype(int)
+    sales = sales.loc[sales["product_id"].isin(selected_product_ids)]
+    daily = sales.groupby(["product_id", "date"], observed=True).agg(
+        sales=("sales", "sum"),
+        is_event=("is_holiday", "max"),
+        snap=("is_promo", "max"),
+    ).reset_index()
+    dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
+    grid = pd.MultiIndex.from_product([selected_product_ids, dates], names=["product_id", "date"]).to_frame(index=False)
+    output = grid.merge(daily, on=["product_id", "date"], how="left")
+    output = output.merge(products[["id", "sku", "name", "category", "unit_price"]], left_on="product_id", right_on="id", how="left")
+    output["id"] = output["product_id"].map(lambda value: f"product-{int(value)}")
+    output["sales"] = output["sales"].fillna(0).astype(float)
+    output["sell_price"] = pd.to_numeric(output["unit_price"], errors="coerce").fillna(0).clip(lower=0)
+    output[["is_event", "snap"]] = output[["is_event", "snap"]].fillna(0).astype("int8")
+    output["wday"] = output["date"].dt.dayofweek + 1
+    output["month"] = output["date"].dt.month
+    output["year"] = output["date"].dt.year
+    output = output[["date", "id", "sku", "name", "category", "sales", "sell_price", "wday", "month", "year", "is_event", "snap"]].sort_values(["id", "date"])
+    bounds = temporal_boundaries(output["date"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data_path = output_dir / "local_inventory.csv.gz"
+    output.to_csv(data_path, index=False, compression="gzip")
+    fingerprint = hashlib.sha256(database.read_bytes()).hexdigest()[:12]
+    manifest = DatasetManifest(
+        dataset="Local Rayventory inventory",
+        source=f"local SQLite sha256:{fingerprint}",
         seed=seed,
         series_count=int(output["id"].nunique()),
         row_count=len(output),

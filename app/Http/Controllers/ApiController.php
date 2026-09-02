@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Product;
 use App\Models\WarehouseStock;
 use App\Services\InventoryExcelService;
+use App\Services\LocalTrainingService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
@@ -23,6 +24,7 @@ class ApiController extends Controller
         private readonly ModelHealthService $modelHealth,
         private readonly ResearchExperimentService $experiments,
         private readonly ModelRegistryService $models,
+        private readonly LocalTrainingService $localTraining,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -121,6 +123,11 @@ class ApiController extends Controller
     public function models(): JsonResponse
     {
         return response()->json($this->models->state());
+    }
+
+    public function trainingReadiness(): JsonResponse
+    {
+        return response()->json($this->localTraining->readiness());
     }
 
     public function registerModelCandidate(Request $request): JsonResponse

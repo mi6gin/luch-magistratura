@@ -602,6 +602,18 @@
         }).join('') || '<p>Кандидатов пока нет. Добавьте модель из таблицы эксперимента.</p>';
     }
 
+    async function loadTrainingReadiness() {
+        const data = await api('training-readiness');
+        document.querySelector('#training-ready').textContent = data.ready ? 'ГОТОВО' : 'НУЖНЫ ДАННЫЕ';
+        document.querySelector('#training-privacy').textContent = data.privacy;
+        document.querySelector('#training-period').textContent = data.date_start && data.date_end
+            ? `${new Date(data.date_start).toLocaleDateString('ru-RU')} — ${new Date(data.date_end).toLocaleDateString('ru-RU')}`
+            : 'нет истории';
+        document.querySelector('#training-span').textContent = `${Number(data.minimum_series_span_days).toLocaleString('ru-RU')} дней`;
+        document.querySelector('#training-series').textContent = `${Number(data.series_eligible).toLocaleString('ru-RU')} / ${Number(data.series_total).toLocaleString('ru-RU')}`;
+        document.querySelector('#training-message').textContent = data.message;
+    }
+
     async function registerModelCandidate(button) {
         const experimentId = document.querySelector('#experiment-selector')?.value;
         setButtonLoading(button, true);
@@ -1123,5 +1135,6 @@
     if (page === 'experiments') {
         loadExperiments();
         loadModelRegistry().catch(error => toast(error.message, 'error'));
+        loadTrainingReadiness().catch(error => toast(error.message, 'error'));
     }
 })();

@@ -7,8 +7,10 @@ use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
@@ -95,6 +97,24 @@ class ApplicationTest extends TestCase
         } finally {
             File::deleteDirectory($root);
         }
+    }
+
+    public function test_local_training_readiness_explains_insufficient_history(): void
+    {
+        Schema::create('sales_history', function (Blueprint $table): void {
+            $table->unsignedBigInteger('product_id');
+            $table->date('sale_date');
+        });
+        \DB::table('sales_history')->insert([
+            ['product_id' => 1, 'sale_date' => '2026-08-01'],
+            ['product_id' => 1, 'sale_date' => '2026-08-30'],
+        ]);
+
+        $this->getJson('/api/training-readiness')->assertOk()
+            ->assertJsonPath('ready', false)
+            ->assertJsonPath('series_eligible', 0)
+            ->assertJsonPath('minimum_series_span_days', 30)
+            ->assertJsonPath('minimum_days', 175);
     }
 
     public function test_inventory_import_requires_an_xlsx_file(): void
