@@ -14,5 +14,8 @@ Route::post('inventory/import/confirm', [ApiController::class, 'confirmInventory
 Route::get('model-health', [ApiController::class, 'modelHealth']);
 Route::get('experiments', [ApiController::class, 'experiments']);
 Route::get('experiments/{id}', [ApiController::class, 'experiment'])->where('id', 'EXP-[A-Z0-9-]+');
+Route::get('models', [ApiController::class, 'models']);
+Route::post('models/candidates', [ApiController::class, 'registerModelCandidate']);
+Route::post('models/{id}/promote', [ApiController::class, 'promoteModel'])->where('id', '[A-Za-z0-9_-]+(?:--[A-Za-z0-9_-]+)?');
 Route::post('simulate', [ApiController::class, 'simulate']);
 Route::post('generate-report', [ApiController::class, 'generateReport']);

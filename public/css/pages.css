@@ -167,5 +167,14 @@
 .experiment-segments { margin-top: 22px; min-width: 0; }
 .experiment-segments .table-scroll { max-width: 100%; overflow-x: auto; }
 .experiment-segments table { min-width: 760px; }
+.model-registry-panel { margin-top: 22px; }
+.model-registry-list { display: grid; gap: 10px; }
+.model-registry-list article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.model-registry-list article span, .model-registry-list article p { display: block; margin: 4px 0 0; color: var(--muted); }
+.model-registry-list article p { grid-column: 1 / -1; }
+.model-registry-list em { font-style: normal; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.registry-ready { color: var(--lime); }
+.registry-blocked { color: var(--orange); }
+.registry-add { min-width: 116px; padding: 8px 10px; font-size: 12px; }
 @media (max-width: 900px) { .experiment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .experiment-panel .panel-header { align-items: stretch; flex-direction: column; } }
 @media (max-width: 520px) { .experiment-summary { grid-template-columns: 1fr; } }

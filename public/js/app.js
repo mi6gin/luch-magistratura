@@ -559,8 +559,8 @@
         const results = [...(experiment.results || [])].sort((a, b) => Number(a.metrics?.wape_pct) - Number(b.metrics?.wape_pct));
         document.querySelector('#experiment-results').innerHTML = results.map((item, index) => {
             const metrics = item.metrics || {};
-            return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер по WAPE</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.underforecast_pct === undefined ? 'н/д' : `${Number(metrics.underforecast_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.risk_cost_pct === undefined ? 'н/д' : `${Number(metrics.risk_cost_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td></tr>`;
-        }).join('') || '<tr><td colspan="11">В эксперименте нет результатов</td></tr>';
+            return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер по WAPE</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.underforecast_pct === undefined ? 'н/д' : `${Number(metrics.underforecast_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.risk_cost_pct === undefined ? 'н/д' : `${Number(metrics.risk_cost_pct).toLocaleString('ru-RU')}%`}</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td><td><button class="button secondary registry-add" data-model="${escapeHtml(item.model)}">В кандидаты</button></td></tr>`;
+        }).join('') || '<tr><td colspan="12">В эксперименте нет результатов</td></tr>';
         const segmentKeys = ['smooth', 'intermittent', 'erratic', 'lumpy'];
         document.querySelector('#experiment-segments').innerHTML = results.map(item => `<tr><td><b>${escapeHtml(item.model)}</b></td>${segmentKeys.map(key => {
             const segment = item.metrics?.segments?.[key];
@@ -582,12 +582,40 @@
             selector.innerHTML = researchExperiments.map(item => `<option value="${escapeHtml(item.experiment_id)}">${escapeHtml(item.experiment_id)} · ${escapeHtml(item.champion || 'без лидера')}</option>`).join('');
             if (!researchExperiments.length) {
                 selector.innerHTML = '<option>Экспериментов пока нет</option>';
-                document.querySelector('#experiment-results').innerHTML = '<tr><td colspan="11">Запустите исследовательский CLI, чтобы получить сравнение.</td></tr>';
+                document.querySelector('#experiment-results').innerHTML = '<tr><td colspan="12">Запустите исследовательский CLI, чтобы получить сравнение.</td></tr>';
                 return;
             }
             renderExperiment(researchExperiments[0]);
         } catch (error) {
             toast(error.message || 'Не удалось загрузить эксперименты', 'error');
+        }
+    }
+
+    async function loadModelRegistry() {
+        const state = await api('models');
+        const production = (state.models || []).find(item => item.id === state.production_id);
+        document.querySelector('#registry-production').textContent = `PROD · ${production?.name || 'fallback'}`;
+        const candidates = (state.models || []).filter(item => item.status !== 'production');
+        document.querySelector('#model-registry-list').innerHTML = candidates.map(item => {
+            const failed = (item.checks || []).filter(check => !check.passed);
+            return `<article><div><b>${escapeHtml(item.name)}</b><span>${escapeHtml(item.status)} · ${escapeHtml(item.experiment_id || 'встроенная')}</span></div><em class="${item.eligible ? 'registry-ready' : 'registry-blocked'}">${item.eligible ? 'готов к публикации' : 'публикация заблокирована'}</em>${failed.length ? `<p>${failed.map(check => escapeHtml(check.message)).join(' ')}</p>` : ''}</article>`;
+        }).join('') || '<p>Кандидатов пока нет. Добавьте модель из таблицы эксперимента.</p>';
+    }
+
+    async function registerModelCandidate(button) {
+        const experimentId = document.querySelector('#experiment-selector')?.value;
+        setButtonLoading(button, true);
+        try {
+            const data = await api('models/candidates', {
+                method: 'POST',
+                body: JSON.stringify({ experiment_id: experimentId, model: button.dataset.model }),
+            });
+            toast(data.candidate.eligible ? 'Кандидат прошёл проверки' : 'Кандидат добавлен, публикация пока заблокирована');
+            await loadModelRegistry();
+        } catch (error) {
+            toast(error.message || 'Не удалось зарегистрировать кандидата', 'error');
+        } finally {
+            setButtonLoading(button, false);
         }
     }
 
@@ -969,6 +997,10 @@
     document.querySelector('#experiment-selector')?.addEventListener('change', event => {
         renderExperiment(researchExperiments.find(item => item.experiment_id === event.target.value));
     });
+    document.querySelector('#experiment-results')?.addEventListener('click', event => {
+        const button = event.target.closest('.registry-add');
+        if (button) registerModelCandidate(button);
+    });
     document.querySelector('#stock-modal')?.addEventListener('click', event => {
         if (event.target.id === 'stock-modal') closeStockModal();
     });
@@ -1088,5 +1120,8 @@
     }
     if (page === 'purchases') loadPurchasePlan();
     if (page === 'model-health') loadModelHealth();
-    if (page === 'experiments') loadExperiments();
+    if (page === 'experiments') {
+        loadExperiments();
+        loadModelRegistry().catch(error => toast(error.message, 'error'));
+    }
 })();

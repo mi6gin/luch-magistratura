@@ -7,6 +7,7 @@ use App\Models\WarehouseStock;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
+use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class ApiController extends Controller
         private readonly InventoryExcelService $excel,
         private readonly ModelHealthService $modelHealth,
         private readonly ResearchExperimentService $experiments,
+        private readonly ModelRegistryService $models,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -114,6 +116,36 @@ class ApiController extends Controller
         abort_if($experiment === null, 404);
 
         return response()->json($experiment);
+    }
+
+    public function models(): JsonResponse
+    {
+        return response()->json($this->models->state());
+    }
+
+    public function registerModelCandidate(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'experiment_id' => ['required', 'string', 'regex:/^EXP-[A-Z0-9-]+$/'],
+            'model' => ['required', 'string', 'max:100'],
+        ]);
+        try {
+            $candidate = $this->models->registerCandidate($data['experiment_id'], $data['model']);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['success' => true, 'candidate' => $candidate], 201);
+    }
+
+    public function promoteModel(Request $request, string $id): JsonResponse
+    {
+        $request->validate(['confirmation' => ['required', 'in:PROMOTE']]);
+        try {
+            return response()->json(['success' => true, 'model' => $this->models->promote($id)]);
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 422);
+        }
     }
 
     public function aiBriefing(): JsonResponse

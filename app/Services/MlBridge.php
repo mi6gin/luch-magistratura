@@ -44,6 +44,7 @@ class MlBridge
         $process = new Process($arguments, base_path(), [
             'ML_DB_PATH' => (string) config('rayventory.database_path'),
             'ML_REPORTS_PATH' => (string) config('rayventory.reports_path'),
+            'ML_MODEL_REGISTRY_PATH' => (string) config('rayventory.model_registry_path'),
         ]);
         $process->setTimeout((float) config('rayventory.timeout', 120));
         try {

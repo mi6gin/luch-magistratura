@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
+use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
@@ -61,6 +62,38 @@ class ApplicationTest extends TestCase
             $this->getJson('/api/experiments')->assertOk()->assertJsonPath('experiments.0.rolling_folds', 3);
         } finally {
             File::deleteDirectory($directory);
+        }
+    }
+
+    public function test_model_registry_blocks_incompatible_research_artifacts(): void
+    {
+        $root = sys_get_temp_dir().'/rayventory-registry-'.bin2hex(random_bytes(5));
+        $experiments = $root.'/experiments';
+        config([
+            'rayventory.experiments_path' => $experiments,
+            'rayventory.model_registry_path' => $root.'/registry.json',
+        ]);
+        File::ensureDirectoryExists($experiments.'/EXP-20260902T120000Z-ABC123');
+        File::put($experiments.'/EXP-20260902T120000Z-ABC123/result.json', json_encode([
+            'experiment_id' => 'EXP-20260902T120000Z-ABC123',
+            'created_at' => '2026-09-02T12:00:00+00:00',
+            'dataset' => ['dataset' => 'UCI Online Retail II'],
+            'rolling_folds' => 3,
+            'results' => [['model' => 'gru', 'metrics' => ['wape_pct' => 20.1]]],
+        ], JSON_THROW_ON_ERROR));
+
+        try {
+            $registry = app(ModelRegistryService::class);
+            $this->assertSame('builtin-seasonal-robust-v1', $registry->state()['production_id']);
+            $candidate = $registry->registerCandidate('EXP-20260902T120000Z-ABC123', 'gru');
+            $this->assertFalse($candidate['eligible']);
+            $this->assertSame('candidate', $candidate['status']);
+            $this->postJson('/api/models/'.$candidate['id'].'/promote', ['confirmation' => 'PROMOTE'])
+                ->assertUnprocessable();
+            $this->getJson('/api/models')->assertOk()
+                ->assertJsonPath('production_id', 'builtin-seasonal-robust-v1');
+        } finally {
+            File::deleteDirectory($root);
         }
     }
 
