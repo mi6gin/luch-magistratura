@@ -241,11 +241,41 @@ class ApplicationTest extends TestCase
                 true,
             ));
 
-            $this->assertGreaterThanOrEqual(365, $preview['period']['days']);
+            $this->assertSame(8, $preview['counts']['products']);
+            $this->assertSame(2920, $preview['counts']['sales']);
+            $this->assertSame(365, $preview['period']['days']);
             $this->assertNotEmpty($preview['sample']);
             $this->assertSame(0, $preview['impact']['products']['current']);
             $this->assertSame($preview['counts']['products'], $preview['impact']['products']['next']);
             $this->assertSame($preview['counts']['products'], $preview['impact']['products']['delta']);
+
+            $book = IOFactory::load($path);
+            $sales = $book->getSheetByName('Продажи')?->toArray(null, true, true, false);
+            $guide = $book->getSheetByName('Инструкция');
+            $this->assertNotNull($sales);
+            $this->assertSame('SKU-1001', $sales[1][0]);
+            $this->assertSame('SKU-1008', $sales[8][0]);
+            $this->assertSame('Стабильный', $guide?->getCell('B27')->getValue());
+            $this->assertSame('Праздничный', $guide?->getCell('B34')->getValue());
+
+            $bySku = [];
+            foreach (array_slice($sales, 1) as $row) {
+                $bySku[$row[0]][] = $row;
+            }
+            $this->assertCount(365, $bySku['SKU-1006']);
+            $this->assertGreaterThan(300, count(array_filter(
+                $bySku['SKU-1006'],
+                fn (array $row): bool => (int) $row[2] === 0,
+            )));
+            $this->assertGreaterThan(0, count(array_filter(
+                $bySku['SKU-1004'],
+                fn (array $row): bool => (int) $row[5] === 1,
+            )));
+            $this->assertGreaterThan(0, count(array_filter(
+                $bySku['SKU-1008'],
+                fn (array $row): bool => (int) $row[4] === 1,
+            )));
+            $book->disconnectWorksheets();
         } finally {
             if (isset($preview['token'])) {
                 File::delete(storage_path('app/import-previews/'.$preview['token'].'.json'));

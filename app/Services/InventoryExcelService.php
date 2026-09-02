@@ -21,6 +21,8 @@ use Throwable;
 
 class InventoryExcelService
 {
+    private const TEMPLATE_HELPER_ROWS = 5_000;
+
     private const SHEETS = [
         'Товары' => ['SKU', 'Название', 'Категория', 'Срок поставки (дни)', 'Цена за единицу'],
         'Продажи' => ['SKU', 'Дата продажи', 'Продано', 'Был в наличии', 'Праздник', 'Промо'],
@@ -65,8 +67,38 @@ class InventoryExcelService
         ], '__EMPTY__', 'A18');
         $guide->mergeCells('A23:E23');
         $guide->setCellValue('A23', $withExample
-            ? 'Это заполненный пример: 3 товара × 365 дней = 1 095 строк продаж за 12 месяцев. Его можно сразу проверить на сайте.'
+            ? 'Это исследовательский пример: 8 товаров × 365 дней = 2 920 строк. Каждый SKU демонстрирует отдельный сценарий из ИУП.'
             : 'Это пустой рабочий шаблон. Не меняйте названия листов и колонок; заполните его своими данными и загрузите на сайте.');
+        if ($withExample) {
+            $guide->mergeCells('A25:E25')->setCellValue('A25', 'СЦЕНАРИИ В ИССЛЕДОВАТЕЛЬСКОМ ПРИМЕРЕ');
+            $guide->fromArray([
+                ['SKU', 'Сценарий', 'Товар', 'Что заложено в данные', 'Что проверяем'],
+                ['SKU-1001', 'Стабильный', 'Молоко', 'Ровный спрос и слабый шум', 'Базовая точность'],
+                ['SKU-1002', 'Недельная сезонность', 'Хлеб', 'Рост спроса в выходные', 'Работу сезонных моделей'],
+                ['SKU-1003', 'Тренд', 'Яблоки', 'Постепенный рост в течение года', 'Реакцию на изменение уровня'],
+                ['SKU-1004', 'Промо', 'Кофе', 'Акция на 5 дней каждые 4 недели', 'Использование промо-признака'],
+                ['SKU-1005', 'Годовая сезонность', 'Мороженое', 'Летний пик и зимний минимум', 'Длинную сезонную зависимость'],
+                ['SKU-1006', 'Прерывистый', 'Фильтр', 'Продажа примерно раз в 12 дней', 'Croston и sparse demand'],
+                ['SKU-1007', 'Нерегулярный', 'Батарейки', 'Редкие крупные групповые заказы', 'Lumpy demand'],
+                ['SKU-1008', 'Праздничный', 'Шоколад', 'Всплески в отмеченные праздники', 'Внешний календарный фактор'],
+            ], '__EMPTY__', 'A26');
+            $guide->getStyle('A25:E25')->applyFromArray([
+                'font' => ['bold' => true, 'color' => ['rgb' => '46E6FF']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '10232F']],
+            ]);
+            $guide->getStyle('A26:E34')->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_TOP);
+            $guide->getStyle('A26:E26')->applyFromArray([
+                'font' => ['bold' => true, 'color' => ['rgb' => '08131D']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '46E6FF']],
+            ]);
+            for ($row = 27; $row <= 34; $row++) {
+                $guide->getRowDimension($row)->setRowHeight(34);
+                if ($row % 2 === 0) {
+                    $guide->getStyle("A{$row}:E{$row}")->getFill()
+                        ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EAFBFF');
+                }
+            }
+        }
 
         $guide->getStyle('A1:E2')->applyFromArray([
             'font' => ['bold' => true, 'size' => 20, 'color' => ['rgb' => 'FFFFFF']],
@@ -109,17 +141,27 @@ class InventoryExcelService
         $guide->freezePane('A10');
 
         $salesExamples = [];
-        $baseDemand = [1001 => 18, 1002 => 30, 1003 => 13];
+        $productIds = range(1001, 1008);
         $startDate = new \DateTimeImmutable('2025-09-01');
         for ($day = 0; $day < 365; $day++) {
             $date = $startDate->modify("+{$day} days");
             $weekend = (int) $date->format('N') >= 6;
-            foreach ($baseDemand as $productId => $base) {
-                $dayOfMonth = (int) $date->format('j');
-                $promo = in_array($dayOfMonth, [8, 9, 22, 23], true) && $productId !== 1003;
+            foreach ($productIds as $productId) {
+                $noise = (($day * (($productId % 5) + 2) + $productId) % 5) - 2;
+                $promo = $productId === 1004 && $day % 28 < 5;
                 $holiday = in_array($date->format('m-d'), ['01-01', '03-08', '05-09', '12-16'], true) ? 1 : 0;
-                $inStock = ! ($productId === 1002 && in_array($date->format('Y-m-d'), ['2026-07-17', '2026-07-18'], true));
-                $quantity = $inStock ? $base + (($day * ($productId % 7)) % 7) + ($weekend ? 4 : 0) + ($promo ? 8 : 0) : 0;
+                $quantity = match ($productId) {
+                    1001 => 18 + $noise,
+                    1002 => 30 + ($weekend ? 12 : 0) + $noise,
+                    1003 => 8 + (int) floor($day / 24) + $noise,
+                    1004 => 7 + ($promo ? 18 : 0) + $noise,
+                    1005 => 6 + (int) round(14 * max(0, sin(2 * M_PI * ($day - 90) / 365))) + $noise,
+                    1006 => $day % 12 === 0 ? 8 + ($day % 5) : 0,
+                    1007 => in_array($day % 35, [0, 1], true) ? 28 + ($day % 11) : 0,
+                    1008 => 5 + ($holiday ? 30 : 0) + ((int) $date->format('m') === 12 ? 5 : 0) + $noise,
+                };
+                $inStock = ! (($productId === 1002 && $day >= 319 && $day <= 321) || ($productId === 1004 && $day >= 190 && $day <= 192));
+                $quantity = $inStock ? max($quantity, 0) : 0;
                 $salesExamples[] = ["SKU-{$productId}", $date->format('Y-m-d'), $quantity, (int) $inStock, $holiday, (int) $promo];
             }
         }
@@ -129,16 +171,28 @@ class InventoryExcelService
                 ['SKU-1001', 'Молоко 3,2% 1 л', 'Молочные продукты', 2, 620],
                 ['SKU-1002', 'Хлеб пшеничный 500 г', 'Хлеб и выпечка', 1, 280],
                 ['SKU-1003', 'Яблоки Голден 1 кг', 'Фрукты и овощи', 3, 890],
+                ['SKU-1004', 'Кофе зерновой 500 г', 'Бакалея', 7, 4200],
+                ['SKU-1005', 'Мороженое пломбир', 'Замороженные продукты', 4, 550],
+                ['SKU-1006', 'Фильтр для принтера', 'Расходные материалы', 14, 6800],
+                ['SKU-1007', 'Батарейки AA, 4 шт.', 'Хозяйственные товары', 10, 1450],
+                ['SKU-1008', 'Шоколад подарочный', 'Кондитерские изделия', 5, 2300],
             ],
             'Продажи' => $salesExamples,
             'Остатки' => [
                 ['SKU-1001', 'Главный склад', '2026-08-31', 42, 5],
                 ['SKU-1002', 'Главный склад', '2026-08-31', 75, 10],
                 ['SKU-1003', 'Главный склад', '2026-08-31', 28, 0],
+                ['SKU-1004', 'Главный склад', '2026-08-31', 35, 4],
+                ['SKU-1005', 'Главный склад', '2026-08-31', 52, 6],
+                ['SKU-1006', 'Главный склад', '2026-08-31', 9, 1],
+                ['SKU-1007', 'Главный склад', '2026-08-31', 18, 2],
+                ['SKU-1008', 'Главный склад', '2026-08-31', 44, 5],
             ],
             'Поставки' => [
                 ['PO-2026-081', 'SKU-1001', 60, '2026-09-03', 'подтверждена', 'ТОО Молочный дом'],
                 ['PO-2026-082', 'SKU-1003', 35, '2026-09-05', 'в пути', 'ТОО Fresh Fruits'],
+                ['PO-2026-083', 'SKU-1004', 24, '2026-09-07', 'подтверждена', 'ТОО Coffee Trade'],
+                ['PO-2026-084', 'SKU-1006', 12, '2026-09-12', 'в пути', 'ТОО Office Supply'],
             ],
         ];
 
@@ -225,21 +279,21 @@ class InventoryExcelService
             }
         }
 
-        $book->getSheetByName('Продажи')?->getStyle('B2:B1000')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
-        $book->getSheetByName('Остатки')?->getStyle('C2:C1000')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
-        $book->getSheetByName('Поставки')?->getStyle('D2:D1000')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        $book->getSheetByName('Продажи')?->getStyle('B2:B'.self::TEMPLATE_HELPER_ROWS)->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        $book->getSheetByName('Остатки')?->getStyle('C2:C'.self::TEMPLATE_HELPER_ROWS)->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        $book->getSheetByName('Поставки')?->getStyle('D2:D'.self::TEMPLATE_HELPER_ROWS)->getNumberFormat()->setFormatCode('yyyy-mm-dd');
         foreach (['D', 'E', 'F'] as $column) {
             $validation = new DataValidation;
             $validation->setType(DataValidation::TYPE_LIST);
             $validation->setAllowBlank(false);
             $validation->setFormula1('"0,1"');
-            $book->getSheetByName('Продажи')?->setDataValidation("{$column}2:{$column}1000", $validation);
+            $book->getSheetByName('Продажи')?->setDataValidation("{$column}2:{$column}".self::TEMPLATE_HELPER_ROWS, $validation);
         }
         $statusValidation = new DataValidation;
         $statusValidation->setType(DataValidation::TYPE_LIST);
         $statusValidation->setAllowBlank(false);
         $statusValidation->setFormula1('"подтверждена,в пути"');
-        $book->getSheetByName('Поставки')?->setDataValidation('E2:E1000', $statusValidation);
+        $book->getSheetByName('Поставки')?->setDataValidation('E2:E'.self::TEMPLATE_HELPER_ROWS, $statusValidation);
 
         $book->setActiveSheetIndexByName('Инструкция');
         (new Xlsx($book))->save($path);
