@@ -11,7 +11,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from research.data import prepare_m5, select_series, temporal_boundaries
+from research.data import prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.dataset import normalize_from_train
 from research.metrics import interval_coverage, point_metrics, quantiles_are_ordered
 from research.experiment import seasonal_baseline
@@ -117,6 +117,40 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(saved["seed"], 42)
             self.assertEqual(saved["row_count"], 570)
             self.assertTrue((output / "m5_subset.csv.gz").is_file())
+
+    def test_prepare_uci_cleans_transactions_and_creates_daily_series(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "retail.xlsx"
+            dates = pd.date_range("2024-01-01", periods=180, freq="D")
+            rows = []
+            for item in ("10001", "10002"):
+                rows.extend({
+                    "Invoice": f"INV-{item}-{index}",
+                    "StockCode": item,
+                    "Description": f"Product {item}",
+                    "Quantity": index % 4 + 1,
+                    "InvoiceDate": date,
+                    "Price": 10.0,
+                    "Customer ID": 1,
+                    "Country": "United Kingdom",
+                } for index, date in enumerate(dates))
+            rows.append({
+                "Invoice": "C-CANCELLED", "StockCode": "10001", "Description": "Cancelled",
+                "Quantity": -100, "InvoiceDate": dates[-1], "Price": 10, "Customer ID": 1,
+                "Country": "United Kingdom",
+            })
+            frame = pd.DataFrame(rows)
+            with pd.ExcelWriter(source, engine="openpyxl") as writer:
+                frame.iloc[:180].to_excel(writer, sheet_name="Year 1", index=False)
+                frame.iloc[180:].to_excel(writer, sheet_name="Year 2", index=False)
+
+            manifest = prepare_uci_online_retail(source, root / "processed", series_limit=2)
+            prepared = pd.read_csv(root / "processed" / "uci_online_retail_subset.csv.gz")
+            self.assertEqual(manifest.series_count, 2)
+            self.assertEqual(manifest.row_count, 360)
+            self.assertGreater(prepared["sales"].min(), -1)
+            self.assertNotIn(-100, prepared["sales"].tolist())
 
 
 if __name__ == "__main__":

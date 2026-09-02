@@ -125,3 +125,77 @@ def prepare_m5(raw_dir: Path, output_dir: Path, series_limit: int = 300, seed: i
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 
+
+def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int = 300, seed: int = SEED) -> DatasetManifest:
+    if not source.is_file():
+        raise FileNotFoundError(f"Файл UCI Online Retail II не найден: {source}")
+    sheets = pd.read_excel(source, sheet_name=None)
+    transactions = pd.concat(sheets.values(), ignore_index=True)
+    transactions.columns = [str(column).strip() for column in transactions.columns]
+    required = {"Invoice", "StockCode", "Description", "Quantity", "InvoiceDate", "Price", "Country"}
+    if not required.issubset(transactions.columns):
+        raise ValueError(f"В UCI-файле отсутствуют колонки: {', '.join(sorted(required - set(transactions.columns)))}")
+    transactions["Invoice"] = transactions["Invoice"].astype(str)
+    transactions["StockCode"] = transactions["StockCode"].astype(str).str.strip()
+    transactions["InvoiceDate"] = pd.to_datetime(transactions["InvoiceDate"], errors="coerce")
+    transactions["Quantity"] = pd.to_numeric(transactions["Quantity"], errors="coerce")
+    transactions["Price"] = pd.to_numeric(transactions["Price"], errors="coerce")
+    valid = transactions.loc[
+        ~transactions["Invoice"].str.upper().str.startswith("C")
+        & transactions["InvoiceDate"].notna()
+        & transactions["Quantity"].gt(0)
+        & transactions["Price"].gt(0)
+        & transactions["StockCode"].str.match(r"^[0-9]{4,6}[A-Z]?$", na=False)
+        & transactions["Country"].eq("United Kingdom")
+    ].copy()
+    if valid.empty:
+        raise ValueError("После очистки UCI Online Retail II не осталось продаж.")
+    valid["date"] = valid["InvoiceDate"].dt.normalize()
+    valid["revenue"] = valid["Quantity"] * valid["Price"]
+    daily = valid.groupby(["StockCode", "date"], observed=True).agg(
+        sales=("Quantity", "sum"), revenue=("revenue", "sum"), description=("Description", "first")
+    ).reset_index()
+    daily["sell_price"] = daily["revenue"] / daily["sales"]
+    profile = daily.groupby("StockCode", observed=True).agg(
+        active_days=("date", "nunique"), total_sales=("sales", "sum"), description=("description", "first")
+    ).reset_index()
+    eligible = profile.loc[profile["active_days"] >= 60].copy()
+    if eligible.empty:
+        raise ValueError("Недостаточно товаров минимум с 60 активными днями продаж.")
+    eligible["dept_id"] = pd.qcut(eligible["active_days"].rank(method="first"), 4, labels=["sporadic", "slow", "regular", "frequent"])
+    eligible["store_id"] = "UK-online"
+    eligible = eligible.rename(columns={"StockCode": "id"})
+    selected = select_series(eligible[["id", "dept_id", "store_id"]], min(series_limit, len(eligible)), seed)
+    chosen = daily.loc[daily["StockCode"].isin(selected["id"])].rename(columns={"StockCode": "id"})
+    dates = pd.date_range(chosen["date"].min(), chosen["date"].max(), freq="D")
+    grid = pd.MultiIndex.from_product([selected["id"], dates], names=["id", "date"]).to_frame(index=False)
+    output = grid.merge(chosen[["id", "date", "sales", "sell_price", "description"]], on=["id", "date"], how="left")
+    output["sales"] = output["sales"].fillna(0).astype(float)
+    output["sell_price"] = output.groupby("id", observed=True)["sell_price"].transform(lambda values: values.ffill()).fillna(0)
+    output["description"] = output.groupby("id", observed=True)["description"].transform(lambda values: values.ffill().bfill())
+    output["wday"] = output["date"].dt.dayofweek + 1
+    output["month"] = output["date"].dt.month
+    output["year"] = output["date"].dt.year
+    output["is_event"] = 0
+    output["snap"] = 0
+    bounds = temporal_boundaries(output["date"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data_path = output_dir / "uci_online_retail_subset.csv.gz"
+    output.to_csv(data_path, index=False, compression="gzip")
+    manifest = DatasetManifest(
+        dataset="UCI Online Retail II",
+        source="https://doi.org/10.24432/C5CG6D",
+        seed=seed,
+        series_count=int(output["id"].nunique()),
+        row_count=len(output),
+        date_start=output["date"].min().date().isoformat(),
+        date_end=output["date"].max().date().isoformat(),
+        history_days=int(output["date"].nunique()),
+        horizon_days=28,
+        train_end=bounds["train_end"],
+        validation_end=bounds["validation_end"],
+        test_end=bounds["test_end"],
+        files={"data": data_path.name},
+    )
+    (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
