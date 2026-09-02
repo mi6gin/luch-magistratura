@@ -223,6 +223,23 @@ WAPE, время обучения, число параметров, лучшую
   --models lstm gru transformer --epochs 30 --patience 5 --folds 3
 ```
 
+Заполненный Excel-пример можно исследовать напрямую, не импортируя и не заменяя
+рабочую базу:
+
+```bash
+.venv-ml/bin/python ml/research_cli.py prepare-excel \
+  --source rayventory_filled_example.xlsx
+.venv-ml/bin/python ml/research_cli.py train \
+  --data data/processed/excel-inventory/excel_inventory.csv.gz \
+  --manifest data/processed/excel-inventory/manifest.json \
+  --models lstm gru transformer --epochs 30 --patience 5 --folds 3
+```
+
+Проверка масштабируемости на 10, 100 и 300 рядах выполняется командой `scale`.
+Команда `report` объединяет основной, сценарный и нагрузочный эксперименты,
+формирует итоговые рекомендации, Markdown-сводку и SVG-графики факта и прогноза
+LSTM, GRU и Transformer. Последний пакет отображается на странице `/experiments`.
+
 Генератор с фиксированным seed создаёт четыре независимых набора: выраженная
 календарная сезонность, линейный тренд, периодические промо и внешний сценарий с
 изменением цены и событиями. Для каждого сценария сохраняются результаты всех

@@ -86,7 +86,7 @@ def make_windows(
 
 
 def load_experiment_data(path: str, manifest: dict, history_days: int = 90, horizon_days: int = 28):
-    frame = pd.read_csv(path, parse_dates=["date"])
+    frame = pd.read_csv(path, parse_dates=["date"], dtype={"id": str}, low_memory=False)
     normalized, scales = normalize_from_train(frame, manifest["train_end"])
     train = make_windows(normalized, None, manifest["train_end"], history_days, horizon_days)
     validation_start = (pd.Timestamp(manifest["train_end"]) + pd.Timedelta(days=1)).date().isoformat()

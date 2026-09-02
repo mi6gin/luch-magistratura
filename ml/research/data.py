@@ -274,3 +274,69 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
     )
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
+
+
+def prepare_excel_inventory(source: Path, output_dir: Path, series_limit: int = 1000, seed: int = SEED) -> DatasetManifest:
+    """Build a research dataset directly from a Rayventory Excel workbook."""
+    if not source.is_file():
+        raise FileNotFoundError(f"Excel-файл не найден: {source}")
+    products = pd.read_excel(source, sheet_name="Товары")
+    sales = pd.read_excel(source, sheet_name="Продажи")
+    required_products = {"SKU", "Название", "Категория", "Цена за единицу"}
+    required_sales = {"SKU", "Дата продажи", "Продано", "Праздник", "Промо"}
+    if not required_products.issubset(products.columns) or not required_sales.issubset(sales.columns):
+        raise ValueError("Excel-файл не соответствует шаблону Rayventory.")
+    products = products.dropna(subset=["SKU"]).copy()
+    products["SKU"] = products["SKU"].astype(str).str.strip()
+    sales = sales.dropna(subset=["SKU", "Дата продажи"]).copy()
+    sales["SKU"] = sales["SKU"].astype(str).str.strip()
+    sales["date"] = pd.to_datetime(sales["Дата продажи"], errors="coerce").dt.normalize()
+    sales["sales"] = pd.to_numeric(sales["Продано"], errors="coerce").fillna(0).clip(lower=0)
+    sales = sales.dropna(subset=["date"])
+    known = set(products["SKU"])
+    sales = sales.loc[sales["SKU"].isin(known)]
+    if products.empty or sales.empty:
+        raise ValueError("Для исследования Excel должен содержать товары и историю продаж.")
+    profile = products.loc[products["SKU"].isin(sales["SKU"].unique()), ["SKU", "Категория"]].copy()
+    profile = profile.rename(columns={"SKU": "id", "Категория": "dept_id"})
+    profile["store_id"] = "excel"
+    selected = select_series(profile[["id", "dept_id", "store_id"]], min(series_limit, len(profile)), seed)
+    selected_skus = selected["id"].astype(str)
+    sales = sales.loc[sales["SKU"].isin(selected_skus)]
+    sales["is_event"] = pd.to_numeric(sales["Праздник"], errors="coerce").fillna(0).clip(0, 1)
+    sales["snap"] = pd.to_numeric(sales["Промо"], errors="coerce").fillna(0).clip(0, 1)
+    daily = sales.groupby(["SKU", "date"], observed=True).agg(
+        sales=("sales", "sum"), is_event=("is_event", "max"), snap=("snap", "max"),
+    ).reset_index()
+    dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
+    grid = pd.MultiIndex.from_product([selected_skus, dates], names=["SKU", "date"]).to_frame(index=False)
+    output = grid.merge(daily, on=["SKU", "date"], how="left")
+    output = output.merge(
+        products[["SKU", "Название", "Категория", "Цена за единицу"]], on="SKU", how="left",
+    )
+    output["id"] = output["SKU"]
+    output["sales"] = output["sales"].fillna(0).astype(float)
+    output["sell_price"] = pd.to_numeric(output["Цена за единицу"], errors="coerce").fillna(0).clip(lower=0)
+    output[["is_event", "snap"]] = output[["is_event", "snap"]].fillna(0).astype("int8")
+    output["wday"] = output["date"].dt.dayofweek + 1
+    output["month"] = output["date"].dt.month
+    output["year"] = output["date"].dt.year
+    output = output[[
+        "date", "id", "SKU", "Название", "Категория", "sales", "sell_price",
+        "wday", "month", "year", "is_event", "snap",
+    ]].sort_values(["id", "date"])
+    bounds = temporal_boundaries(output["date"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data_path = output_dir / "excel_inventory.csv.gz"
+    output.to_csv(data_path, index=False, compression="gzip")
+    fingerprint = hashlib.sha256(source.read_bytes()).hexdigest()[:12]
+    manifest = DatasetManifest(
+        dataset="Rayventory Excel research example",
+        source=f"local Excel sha256:{fingerprint}", seed=seed,
+        series_count=int(output["id"].nunique()), row_count=len(output),
+        date_start=output["date"].min().date().isoformat(), date_end=output["date"].max().date().isoformat(),
+        history_days=int(output["date"].nunique()), horizon_days=28, **bounds,
+        files={"data": data_path.name},
+    )
+    (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest

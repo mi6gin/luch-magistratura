@@ -18,5 +18,6 @@ return [
     'dataset_analysis_path' => env('ML_DATASET_ANALYSIS_PATH') ?: storage_path('app/dataset-analysis/latest.json'),
     'tuning_path' => env('ML_TUNING_PATH') ?: storage_path('app/tuning'),
     'scenarios_path' => env('ML_SCENARIOS_PATH') ?: storage_path('app/scenarios'),
+    'research_report_path' => env('ML_RESEARCH_REPORT_PATH') ?: storage_path('app/research-report/latest'),
     'timeout' => env('ML_TIMEOUT', 120),
 ];

@@ -119,6 +119,13 @@ def evaluate_model(name: str, checkpoint_path: Path, test, sales_scales: dict[st
         "inference_ms": round(inference_ms, 3),
         "test_windows": len(actual),
         "segments": segment_metrics(actual, median, test[0][..., 0]),
+        "forecast_preview": {
+            "series_id": str(test[2][0]),
+            "actual": np.round(actual[0], 4).tolist(),
+            "q10": np.round(lower[0], 4).tolist(),
+            "q50": np.round(median[0], 4).tolist(),
+            "q90": np.round(upper[0], 4).tolist(),
+        },
     }
 
 

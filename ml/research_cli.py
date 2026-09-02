@@ -6,11 +6,13 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail
+from research.data import prepare_excel_inventory, prepare_local_inventory, prepare_m5, prepare_uci_online_retail
 from research.analysis import analyze_dataset
 from research.experiment import run_experiment
 from research.tuning import tune_models
 from research.scenarios import benchmark_scenarios
+from research.scalability import benchmark_scalability
+from research.reporting import build_research_report
 from research.trainer import TrainingConfig
 
 
@@ -32,6 +34,11 @@ def main() -> None:
     prepare_local.add_argument("--output-dir", type=Path, default=Path("data/processed/local-inventory"))
     prepare_local.add_argument("--series", type=int, default=1000)
     prepare_local.add_argument("--seed", type=int, default=42)
+    prepare_excel = subparsers.add_parser("prepare-excel", help="Prepare research data directly from a Rayventory Excel workbook")
+    prepare_excel.add_argument("--source", type=Path, required=True)
+    prepare_excel.add_argument("--output-dir", type=Path, default=Path("data/processed/excel-inventory"))
+    prepare_excel.add_argument("--series", type=int, default=1000)
+    prepare_excel.add_argument("--seed", type=int, default=42)
     analyze = subparsers.add_parser("analyze", help="Profile demand, quality, seasonality and external factors")
     analyze.add_argument("--data", type=Path, required=True)
     analyze.add_argument("--manifest", type=Path, required=True)
@@ -67,6 +74,21 @@ def main() -> None:
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--folds", type=int, choices=range(1, 7), default=3)
     train.add_argument("--summary", action="store_true", help="Print a compact result instead of the full experiment document")
+    scale = subparsers.add_parser("scale", help="Measure neural accuracy and runtime as the number of series grows")
+    scale.add_argument("--data", type=Path, required=True)
+    scale.add_argument("--manifest", type=Path, required=True)
+    scale.add_argument("--output", type=Path, default=Path("storage/app/scalability"))
+    scale.add_argument("--experiments-output", type=Path, default=Path("storage/app/experiments"))
+    scale.add_argument("--models", nargs="+", choices=["lstm", "gru", "transformer"], default=["lstm", "gru", "transformer"])
+    scale.add_argument("--sizes", nargs="+", type=int, default=[10, 100, 300])
+    scale.add_argument("--epochs", type=int, default=3)
+    scale.add_argument("--patience", type=int, default=2)
+    scale.add_argument("--batch-size", type=int, default=256)
+    report = subparsers.add_parser("report", help="Build the final IUP research summary and forecast charts")
+    report.add_argument("--experiment", type=Path, required=True)
+    report.add_argument("--scenarios", type=Path, required=True)
+    report.add_argument("--scalability", type=Path, required=True)
+    report.add_argument("--output", type=Path, default=Path("storage/app/research-report/latest"))
     args = parser.parse_args()
 
     if args.action == "prepare-m5":
@@ -75,6 +97,8 @@ def main() -> None:
         print(json.dumps(asdict(prepare_uci_online_retail(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "prepare-local":
         print(json.dumps(asdict(prepare_local_inventory(args.database, args.output_dir, args.series, args.seed)), ensure_ascii=False))
+    elif args.action == "prepare-excel":
+        print(json.dumps(asdict(prepare_excel_inventory(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "analyze":
         print(json.dumps({"success": True, **analyze_dataset(args.data, args.manifest, args.output)}, ensure_ascii=False))
     elif args.action == "tune":
@@ -110,6 +134,19 @@ def main() -> None:
             "ranking": result["ranking"],
         } if args.summary else result
         print(json.dumps(output, ensure_ascii=False))
+    elif args.action == "scale":
+        config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
+        result = benchmark_scalability(
+            args.data, args.manifest, args.output, args.experiments_output,
+            args.models, args.sizes, config,
+        )
+        print(json.dumps({"success": True, "benchmark_id": result["benchmark_id"], "results": result["results"]}, ensure_ascii=False))
+    elif args.action == "report":
+        result = build_research_report(args.experiment, args.scenarios, args.scalability, args.output)
+        print(json.dumps({
+            "success": True, "overall_winner": result["overall_winner"],
+            "best_neural": result["best_neural"], "output": str(args.output),
+        }, ensure_ascii=False))
 
 
 if __name__ == "__main__":

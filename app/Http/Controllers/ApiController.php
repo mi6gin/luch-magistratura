@@ -12,10 +12,12 @@ use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
+use App\Services\ResearchReportService;
 use App\Services\ResearchTuningService;
 use App\Services\ScenarioBenchmarkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -33,6 +35,7 @@ class ApiController extends Controller
         private readonly DatasetAnalysisService $datasetAnalysis,
         private readonly ResearchTuningService $tuning,
         private readonly ScenarioBenchmarkService $scenarios,
+        private readonly ResearchReportService $researchReport,
     ) {}
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -158,6 +161,19 @@ class ApiController extends Controller
     public function scenarios(): JsonResponse
     {
         return response()->json(['benchmark' => $this->scenarios->latest()]);
+    }
+
+    public function researchReport(): JsonResponse
+    {
+        return response()->json(['report' => $this->researchReport->latest()]);
+    }
+
+    public function researchChart(string $model): Response
+    {
+        $chart = $this->researchReport->chart($model);
+        abort_if($chart === null, 404);
+
+        return response($chart, 200, ['Content-Type' => 'image/svg+xml; charset=UTF-8']);
     }
 
     public function startTrainingPipeline(): JsonResponse

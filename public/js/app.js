@@ -663,6 +663,17 @@
             : 'Нейросетевые результаты отсутствуют.';
     }
 
+    async function loadResearchReport() {
+        const data = await api('research-report');
+        const report = data.report;
+        if (!report) return;
+        document.querySelector('#research-report-meta').textContent = `${report.dataset} · ${report.rolling_folds} rolling-окна`;
+        document.querySelector('#research-best-neural').textContent = `ЛУЧШАЯ НС · ${String(report.best_neural).toUpperCase()}`;
+        document.querySelector('#research-verdict').textContent = report.conclusion;
+        document.querySelector('#research-recommendations').innerHTML = (report.recommendations || []).map((item, index) => `<article><b>${String(index + 1).padStart(2, '0')}</b> ${escapeHtml(item)}</article>`).join('');
+        document.querySelector('#research-scale-results').innerHTML = (report.scalability || []).map(item => `<tr><td><b>${Number(item.series).toLocaleString('ru-RU')} рядов</b></td><td>${Number(item.rows).toLocaleString('ru-RU')}</td><td>${Number(item.wall_seconds).toLocaleString('ru-RU')} сек.</td><td>${Number(item.process_peak_memory_mb).toLocaleString('ru-RU')} МБ</td></tr>`).join('') || '<tr><td colspan="4">Нет результатов масштабирования.</td></tr>';
+    }
+
     async function startLocalTraining(button) {
         setButtonLoading(button, true);
         try {
@@ -1224,5 +1235,6 @@
         loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
         loadTuning().catch(error => toast(error.message, 'error'));
         loadScenarios().catch(error => toast(error.message, 'error'));
+        loadResearchReport().catch(error => toast(error.message, 'error'));
     }
 })();

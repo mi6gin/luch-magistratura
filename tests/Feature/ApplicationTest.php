@@ -7,6 +7,7 @@ use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
+use App\Services\ResearchReportService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
@@ -62,6 +63,24 @@ class ApplicationTest extends TestCase
             $this->assertSame('gru', $service->find('EXP-20260902T120000Z-ABC123')['champion']);
             $this->assertNull($service->find('../secrets'));
             $this->getJson('/api/experiments')->assertOk()->assertJsonPath('experiments.0.rolling_folds', 3);
+        } finally {
+            File::deleteDirectory($directory);
+        }
+    }
+
+    public function test_research_report_exposes_summary_and_safe_charts(): void
+    {
+        $directory = sys_get_temp_dir().'/rayventory-report-'.bin2hex(random_bytes(5));
+        config(['rayventory.research_report_path' => $directory]);
+        File::ensureDirectoryExists($directory);
+        File::put($directory.'/summary.json', json_encode(['best_neural' => 'gru'], JSON_THROW_ON_ERROR));
+        File::put($directory.'/forecast-gru.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+
+        try {
+            $this->assertSame('gru', app(ResearchReportService::class)->latest()['best_neural']);
+            $this->getJson('/api/research-report')->assertOk()->assertJsonPath('report.best_neural', 'gru');
+            $this->get('/api/research-report/chart/gru')->assertOk()->assertHeader('Content-Type', 'image/svg+xml; charset=UTF-8');
+            $this->get('/api/research-report/chart/unknown')->assertNotFound();
         } finally {
             File::deleteDirectory($directory);
         }

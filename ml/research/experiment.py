@@ -178,6 +178,9 @@ def _aggregate(results: list[dict]) -> list[dict]:
             "parameter_count": int(folds[-1].get("parameter_count", 0)),
             "folds_completed": len(folds),
         }
+        preview = folds[-1]["metrics"].get("forecast_preview")
+        if preview:
+            aggregate["forecast_preview"] = preview
         route_names = sorted({segment for fold in folds for segment in fold.get("routes", {})})
         if route_names:
             aggregate["routes"] = {

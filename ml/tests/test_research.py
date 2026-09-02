@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from research.data import prepare_local_inventory, prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
+from research.data import prepare_excel_inventory, prepare_local_inventory, prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.analysis import analyze_dataset
 from research.dataset import FEATURES, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
@@ -223,6 +223,28 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(analysis["period"]["days"], 200)
             self.assertIn("weekly_lag_correlation", analysis["patterns"])
             self.assertIn(analysis["series_preview"][0]["demand_type"], {"smooth", "intermittent", "erratic", "lumpy"})
+
+    def test_prepare_excel_inventory_uses_rayventory_workbook(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "inventory.xlsx"
+            dates = pd.date_range("2025-01-01", periods=180)
+            products = pd.DataFrame([
+                {"SKU": "SKU-1", "Название": "Товар 1", "Категория": "Тест", "Цена за единицу": 100},
+                {"SKU": "SKU-2", "Название": "Товар 2", "Категория": "Тест", "Цена за единицу": 200},
+            ])
+            sales = pd.DataFrame([
+                {"SKU": sku, "Дата продажи": date, "Продано": index % 7, "Праздник": int(index == 0), "Промо": int(index % 30 < 3)}
+                for sku in ("SKU-1", "SKU-2") for index, date in enumerate(dates)
+            ])
+            with pd.ExcelWriter(source, engine="openpyxl") as writer:
+                products.to_excel(writer, sheet_name="Товары", index=False)
+                sales.to_excel(writer, sheet_name="Продажи", index=False)
+            manifest = prepare_excel_inventory(source, root / "processed")
+            prepared = pd.read_csv(root / "processed" / "excel_inventory.csv.gz")
+            self.assertEqual(manifest.series_count, 2)
+            self.assertEqual(manifest.row_count, 360)
+            self.assertEqual(prepared["snap"].max(), 1)
 
 
 if __name__ == "__main__":
