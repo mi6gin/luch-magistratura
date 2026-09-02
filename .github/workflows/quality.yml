@@ -16,17 +16,19 @@ jobs:
           coverage: none
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-ml.txt
       - name: PHP tests
         run: composer test
       - name: PHP style
         run: vendor/bin/pint --test
       - name: Python syntax
         run: python -m compileall -q ml
+      - name: Research pipeline tests
+        run: python -m unittest discover -s ml/tests -p 'test_*.py'
 
   docker:
     runs-on: ubuntu-latest

@@ -158,6 +158,8 @@ docker compose up --build
 - `ml/predict_cli.py` — JSON CLI между Laravel и Python;
 - `ml/forecasting.py` — production-прогноз и расчёт рекомендаций;
 - `ml/report_generator.py` — генерация PDF и PPTX;
+- `ml/research/` — воспроизводимый контур M5 и архитектуры LSTM, GRU, Transformer;
+- `data/README.md` — загрузка официального M5 и подготовка исследовательской выборки;
 - `database/seed/inventory_forecast.db` — неизменяемая демонстрационная база;
 - `storage/app/rayventory/inventory_forecast.db` — рабочая база приложения;
 - `storage/app/reports` — сформированные отчёты.
@@ -165,6 +167,31 @@ docker compose up --build
 Рабочая база и отчёты находятся в `storage` и не попадают в Git. Demo-seed содержит
 синтетическую историю, поэтому приложение явно предупреждает об устаревших данных.
 Перед реальным использованием замените её актуальной историей продаж.
+
+### Исследовательский контур M5
+
+Нейросетевые эксперименты изолированы от основного runtime, чтобы обычный запуск
+сайта не устанавливал тяжёлый PyTorch. Подготовка окружения и данных:
+
+```bash
+python3.12 -m venv .venv-ml
+.venv-ml/bin/pip install -r requirements-ml.txt
+.venv-ml/bin/kaggle competitions download -c m5-forecasting-accuracy -p data/raw/m5
+unzip data/raw/m5/m5-forecasting-accuracy.zip -d data/raw/m5
+.venv-ml/bin/python ml/research_cli.py prepare-m5 --series 300 --seed 42
+```
+
+После подготовки запускается единый эксперимент:
+
+```bash
+.venv-ml/bin/python ml/research_cli.py train
+```
+
+Он сравнивает seasonal baseline, LSTM, GRU и Transformer на одинаковых временных
+train/validation/test-периодах. Нормализация рассчитывается только по train,
+нейросети обучаются с Pinball Loss и early stopping, а результат вместе с весами,
+метриками, параметрами и версиями окружения сохраняется в
+`storage/app/experiments/EXP-*/`.
 
 ## Загрузка данных из Excel
 

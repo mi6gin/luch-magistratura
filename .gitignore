@@ -4,6 +4,11 @@
 
 /vendor/
 /.venv/
+/.venv-ml/
+/data/raw/
+/data/processed/
+/storage/app/models/
+/storage/app/experiments/
 /node_modules/
 /public/build/
 /public/Python/
