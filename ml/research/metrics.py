@@ -25,3 +25,27 @@ def quantiles_are_ordered(values: np.ndarray) -> bool:
     values = np.asarray(values, dtype=float)
     return bool(np.all(values[..., 0] <= values[..., 1]) and np.all(values[..., 1] <= values[..., 2]))
 
+
+def demand_type(history: np.ndarray) -> str:
+    history = np.asarray(history, dtype=float)
+    positive = history[history > 0]
+    if not len(positive):
+        return "intermittent"
+    adi = len(history) / len(positive)
+    cv_squared = float((positive.std() / max(positive.mean(), 1e-9)) ** 2)
+    if adi < 1.32 and cv_squared < 0.49:
+        return "smooth"
+    if adi >= 1.32 and cv_squared < 0.49:
+        return "intermittent"
+    if adi < 1.32:
+        return "erratic"
+    return "lumpy"
+
+
+def segment_metrics(actual: np.ndarray, predicted: np.ndarray, histories: np.ndarray) -> dict[str, dict[str, float]]:
+    labels = np.asarray([demand_type(history) for history in histories])
+    return {
+        label: {**point_metrics(actual[labels == label], predicted[labels == label]), "windows": int((labels == label).sum())}
+        for label in ("smooth", "intermittent", "erratic", "lumpy")
+        if np.any(labels == label)
+    }

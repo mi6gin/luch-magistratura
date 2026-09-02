@@ -561,6 +561,11 @@
             const metrics = item.metrics || {};
             return `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лидер эксперимента</span>' : ''}</td><td>${Number(metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>± ${Number(metrics.wape_pct_std || 0).toLocaleString('ru-RU')}</td><td>${Number(metrics.mae).toLocaleString('ru-RU')}</td><td>${Number(metrics.rmse).toLocaleString('ru-RU')}</td><td>${Number(metrics.bias_pct).toLocaleString('ru-RU')}%</td><td>${metrics.coverage_pct === undefined ? 'н/д' : `${Number(metrics.coverage_pct).toLocaleString('ru-RU')}%`}</td><td>${Number(item.training_seconds || 0).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count || 0).toLocaleString('ru-RU')}</td></tr>`;
         }).join('') || '<tr><td colspan="9">В эксперименте нет результатов</td></tr>';
+        const segmentKeys = ['smooth', 'intermittent', 'erratic', 'lumpy'];
+        document.querySelector('#experiment-segments').innerHTML = results.map(item => `<tr><td><b>${escapeHtml(item.model)}</b></td>${segmentKeys.map(key => {
+            const segment = item.metrics?.segments?.[key];
+            return `<td>${segment ? `${Number(segment.wape_pct).toLocaleString('ru-RU')}% <span class="table-subline">${Number(segment.windows || 0).toLocaleString('ru-RU')} окон</span>` : 'н/д'}</td>`;
+        }).join('')}</tr>`).join('') || '<tr><td colspan="5">Сегментные метрики появятся после нового rolling-запуска.</td></tr>';
         const leader = results[0];
         document.querySelector('#experiment-note').textContent = Number(experiment.rolling_folds || 1) > 1
             ? `Рейтинг рассчитан по среднему WAPE на ${experiment.rolling_folds} последовательных окнах. Разброс показывает устойчивость результата.`

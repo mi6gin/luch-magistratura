@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from research.data import prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.dataset import normalize_from_train
-from research.metrics import interval_coverage, point_metrics, quantiles_are_ordered
-from research.experiment import _aggregate, _fold_manifest, seasonal_baseline
+from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
+from research.experiment import _aggregate, _croston_sba, _fold_manifest, seasonal_baseline
 
 
 class ResearchPipelineTest(unittest.TestCase):
@@ -51,6 +51,12 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(aggregate["metrics"]["wape_pct"], 20.0)
         self.assertEqual(aggregate["metrics"]["wape_pct_std"], 10.0)
         self.assertEqual(aggregate["folds_completed"], 3)
+
+    def test_intermittent_demand_is_classified_and_croston_is_positive(self):
+        history = np.zeros(90)
+        history[[5, 20, 40, 65, 80]] = [4, 6, 5, 7, 6]
+        self.assertEqual(demand_type(history), "intermittent")
+        self.assertGreater(_croston_sba(history), 0)
 
     def test_temporal_split_keeps_test_after_validation(self):
         dates = pd.Series(pd.date_range("2024-01-01", periods=220, freq="D"))

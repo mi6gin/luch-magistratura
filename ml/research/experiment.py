@@ -11,8 +11,25 @@ import numpy as np
 import pandas as pd
 
 from .dataset import load_experiment_data
-from .metrics import point_metrics
+from .metrics import point_metrics, segment_metrics
 from .trainer import TrainingConfig, evaluate_model, save_result, train_model
+
+
+def _baseline_result(name: str, prediction: np.ndarray, test, sales_scales: dict[str, float]) -> dict:
+    x, y, ids = test
+    scales = np.asarray([sales_scales[series_id] for series_id in ids], dtype=float)[:, None]
+    actual = y * scales
+    predicted = prediction * scales
+    return {
+        "model": name,
+        "metrics": {
+            **point_metrics(actual, predicted),
+            "test_windows": len(y),
+            "segments": segment_metrics(actual, predicted, x[..., 0]),
+        },
+        "training_seconds": 0.0,
+        "parameter_count": 0,
+    }
 
 
 def seasonal_baseline(test, sales_scales: dict[str, float]) -> dict:
@@ -21,13 +38,36 @@ def seasonal_baseline(test, sales_scales: dict[str, float]) -> dict:
         raise ValueError("Seasonal baseline требует минимум 7 дней истории.")
     horizon = y.shape[1]
     prediction = x[:, -7:, 0][:, np.arange(horizon) % 7]
-    scales = np.asarray([sales_scales[series_id] for series_id in ids], dtype=float)[:, None]
-    return {
-        "model": "seasonal_naive_7",
-        "metrics": {**point_metrics(y * scales, prediction * scales), "test_windows": len(y)},
-        "training_seconds": 0.0,
-        "parameter_count": 0,
-    }
+    return _baseline_result("seasonal_naive_7", prediction, test, sales_scales)
+
+
+def median_baseline(test, sales_scales: dict[str, float]) -> dict:
+    x, y, _ = test
+    daily = np.median(x[:, -28:, 0], axis=1)
+    prediction = np.repeat(daily[:, None], y.shape[1], axis=1)
+    return _baseline_result("moving_median_28", prediction, test, sales_scales)
+
+
+def _croston_sba(history: np.ndarray, alpha: float = 0.1) -> float:
+    nonzero = np.flatnonzero(history > 0)
+    if not len(nonzero):
+        return 0.0
+    demand = float(history[nonzero[0]])
+    interval = float(nonzero[0] + 1)
+    previous = int(nonzero[0])
+    for index in nonzero[1:]:
+        demand += alpha * (float(history[index]) - demand)
+        gap = int(index) - previous
+        interval += alpha * (gap - interval)
+        previous = int(index)
+    return max((1 - alpha / 2) * demand / max(interval, 1e-9), 0.0)
+
+
+def croston_baseline(test, sales_scales: dict[str, float]) -> dict:
+    x, y, _ = test
+    daily = np.asarray([_croston_sba(history) for history in x[..., 0]])
+    prediction = np.repeat(daily[:, None], y.shape[1], axis=1)
+    return _baseline_result("croston_sba", prediction, test, sales_scales)
 
 
 def _fold_manifest(base: dict, fold_index: int, fold_count: int, step_days: int = 28) -> dict:
@@ -60,6 +100,16 @@ def _aggregate(results: list[dict]) -> list[dict]:
         if coverage_values:
             metrics["coverage_pct"] = round(float(np.mean(coverage_values)), 4)
             metrics["coverage_pct_std"] = round(float(np.std(coverage_values, ddof=1)), 4) if len(coverage_values) > 1 else 0.0
+        segments = {}
+        segment_names = sorted({segment for fold in folds for segment in fold["metrics"].get("segments", {})})
+        for segment in segment_names:
+            available = [fold["metrics"]["segments"][segment] for fold in folds if segment in fold["metrics"].get("segments", {})]
+            segments[segment] = {
+                metric: round(float(np.mean([item[metric] for item in available])), 4)
+                for metric in metric_names
+            }
+            segments[segment]["windows"] = int(sum(item["windows"] for item in available))
+        metrics["segments"] = segments
         aggregated.append({
             "model": name,
             "metrics": metrics,
@@ -90,7 +140,11 @@ def run_experiment(
     for fold_index in range(folds):
         current_manifest = _fold_manifest(manifest, fold_index, folds)
         _, scales, train, validation, test = load_experiment_data(str(data_path), current_manifest, config.history_days, config.horizon_days)
-        current_results = [seasonal_baseline(test, scales.sales)]
+        current_results = [
+            seasonal_baseline(test, scales.sales),
+            median_baseline(test, scales.sales),
+            croston_baseline(test, scales.sales),
+        ]
         fold_dir = output_dir / f"fold-{fold_index + 1}"
         for name in models:
             print(f"fold {fold_index + 1}/{folds}: training {name}", file=sys.stderr, flush=True)

@@ -164,5 +164,8 @@
 .experiment-table { min-width: 1040px; }
 .experiment-winner td:first-child { border-left: 2px solid var(--lime); }
 .experiment-note { margin-top: 16px; padding: 13px 15px; border-radius: 10px; color: var(--muted); background: var(--soft); line-height: 1.5; }
+.experiment-segments { margin-top: 22px; min-width: 0; }
+.experiment-segments .table-scroll { max-width: 100%; overflow-x: auto; }
+.experiment-segments table { min-width: 760px; }
 @media (max-width: 900px) { .experiment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .experiment-panel .panel-header { align-items: stretch; flex-direction: column; } }
 @media (max-width: 520px) { .experiment-summary { grid-template-columns: 1fr; } }

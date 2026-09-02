@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .metrics import interval_coverage, point_metrics, quantiles_are_ordered
+from .metrics import interval_coverage, point_metrics, quantiles_are_ordered, segment_metrics
 from .models import build_model, pinball_loss, require_torch
 
 
@@ -118,6 +118,7 @@ def evaluate_model(name: str, checkpoint_path: Path, test, sales_scales: dict[st
         "quantiles_ordered": quantiles_are_ordered(prediction),
         "inference_ms": round(inference_ms, 3),
         "test_windows": len(actual),
+        "segments": segment_metrics(actual, median, test[0][..., 0]),
     }
 
 
