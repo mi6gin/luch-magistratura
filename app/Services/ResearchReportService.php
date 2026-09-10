@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\File;
 
 class ResearchReportService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function latest(): ?array
     {
         $path = $this->directory().'/summary.json';
@@ -27,6 +29,6 @@ class ResearchReportService
 
     private function directory(): string
     {
-        return (string) config('rayventory.research_report_path', storage_path('app/research-report/latest'));
+        return $this->branches->scopedPath((string) config('rayventory.research_report_path', storage_path('app/research-report/latest')));
     }
 }

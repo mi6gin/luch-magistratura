@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -202,10 +203,11 @@ def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int 
     return manifest
 
 
-def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int = 1000, seed: int = SEED) -> DatasetManifest:
+def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int = 1000, seed: int = SEED, branch_id: int | None = None) -> DatasetManifest:
     """Build a research dataset from the user's local SQLite database only."""
     if not database.is_file():
         raise FileNotFoundError(f"Локальная SQLite-база не найдена: {database}")
+    branch_id = branch_id or int(os.getenv("ML_BRANCH_ID", "1"))
     with sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not {"products", "sales_history"}.issubset(tables):
@@ -218,6 +220,12 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
             "SELECT product_id, sale_date, quantity_sold, in_stock, is_holiday, is_promo FROM sales_history",
             connection,
         )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(sales_history)")}
+        if "branch_id" in columns:
+            sales = pd.read_sql_query(
+                "SELECT product_id, sale_date, quantity_sold, in_stock, is_holiday, is_promo FROM sales_history WHERE branch_id = ?",
+                connection, params=(branch_id,),
+            )
     if products.empty or sales.empty:
         raise ValueError("Для локального обучения нужны товары и история продаж.")
     sales["date"] = pd.to_datetime(sales["sale_date"], errors="coerce").dt.normalize()

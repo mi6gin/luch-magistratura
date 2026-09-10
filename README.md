@@ -1,230 +1,435 @@
 # Rayventory
 
-Самостоятельная система прогнозирования товарных запасов на Laravel и Python.
-Приложение рассчитывает 30-дневный диапазон спроса, моделирует остатки и формирует
-управленческие отчёты в PDF и PPTX.
+Rayventory — локальная многопользовательская система прогнозирования товарных
+запасов для сети филиалов. Веб-часть написана на Laravel 12, прогнозирование и
+отчёты — на Python, хранилище — SQLite.
+Node.js и сборка фронтенда не нужны: интерфейс состоит из Blade-шаблонов,
+обычного JavaScript и CSS в `public/`.
 
-## Возможности
+Этот README — единая инструкция по установке, эксплуатации, тестированию и
+ориентации в коде. Перед началом работы рекомендуется ознакомиться с краткой
+сводкой и использовать приведённые ниже готовые команды.
 
-- robust-прогноз `seasonal-robust-v1` с диапазоном q10-q90;
-- восстановление спроса при отсутствии товара строго внутри одного SKU;
-- сценарии standard, risk, optimization, trend и promo;
-- рекомендации по заказу с учётом остатка, товара в пути и срока поставки;
-- современный PDF-отчёт и редактируемая презентация PPTX;
-- Laravel API для склада, симуляций, состояния расчётов и отчётов.
-- загрузка исходных данных из проверяемого Excel-шаблона через интерфейс склада;
-- очередь закупок с приоритетом, датой дефицита и объяснением каждой рекомендации;
-- мониторинг свежести данных и история фактических backtesting-метрик модели;
-- оценка качества данных и backtesting модели по WAPE, bias и покрытию q10-q90;
-- расширяемый контур складов, поставщиков и заказов поставщикам.
-- бюджетный режим, календарь действий и выгрузка готового заказа в Excel.
+## Основные сведения и соглашения
 
-## Требования
+- Корень проекта содержит `artisan`, `composer.json` и каталог `ml/`.
+- Требуются PHP 8.2+, Composer 2, Python 3.11+ и PHP-расширения
+  `pdo_sqlite`, `sqlite3`, `mbstring`, `zip`, `gd`.
+- Проверенное CI-окружение: PHP 8.5 и Python 3.12.
+- Обычное приложение: `.venv` + `requirements.txt`.
+- Все Python-тесты и исследования: `.venv-ml` + `requirements-ml.txt`.
+  Расширенный набор включает runtime-зависимости, PyTorch, Kaggle и `openpyxl`.
+- `vendor/`, виртуальные окружения, рабочая база и артефакты исключены из Git.
+- Не редактировать `database/seed/inventory_forecast.db`: это неизменяемый
+  demo-seed. Рабочая база находится в
+  `storage/app/rayventory/inventory_forecast.db`.
+- `php artisan rayventory:setup` не заменяет существующую базу. Вариант
+  `--force` уничтожает локально импортированные данные и требует явного согласия.
+- PHPUnit использует SQLite `:memory:` и не меняет рабочую базу.
+- Данные, импорт, прогнозы, модели и отчёты изолированы по филиалам.
+- После `rayventory:setup` создаётся локальный администратор. До запуска команды
+  задайте уникальный пароль через `RAYVENTORY_ADMIN_PASSWORD`.
+- Не запускать `train`, `tune`, `scenarios` или `scale`, если задача этого не
+  требует: операции могут быть долгими. Для обычной проверки есть быстрый набор.
+- В проекте нет npm-зависимостей и отдельного build-шага для CSS/JS.
 
-- PHP 8.2 или новее;
-- Composer 2;
-- Python 3.11 или новее;
-- расширение PHP `pdo_sqlite`.
+## Карта проекта
 
-Python-зависимости перечислены в `requirements.txt`.
+```text
+Browser (Blade + public/js + public/css)
+                 │ HTTP/JSON
+                 ▼
+Laravel routes → ApiController → Services / Eloquent
+                 │ subprocess          │ SQL
+                 ▼                     ▼
+          ml/predict_cli.py           SQLite
+                 │
+                 ▼
+       forecast / PDF / PPTX / JSON → storage/app
+```
 
-## Локальная установка на macOS и Linux
+| Путь | Назначение |
+|---|---|
+| `routes/web.php` | Страницы и безопасная выдача файлов |
+| `routes/api.php` | JSON API |
+| `app/Http/Controllers/ApiController.php` | Валидация и координация сервисов |
+| `app/Services/BranchContext.php` | Проверенный контекст активного филиала |
+| `app/Services/MlBridge.php` | Запуск Python с филиальным контекстом |
+| `app/Services/InventoryExcelService.php` | Шаблон, preview и импорт Excel |
+| `app/Services/ModelRegistryService.php` | Реестр candidate/production-моделей |
+| `app/Services/LocalModelPipelineService.php` | Фоновый локальный ML-конвейер |
+| `ml/predict_cli.py` | Стабильный JSON CLI production runtime |
+| `ml/forecasting.py` | Прогноз и рекомендации по закупке |
+| `ml/report_generator.py` | PDF- и PPTX-отчёты |
+| `ml/runtime_model.py` | Загрузка опубликованной runtime-модели |
+| `ml/research_cli.py` | CLI исследовательского контура |
+| `ml/research/` | Данные, метрики, baseline, нейросети, эксперименты |
+| `database/migrations/` | Схема рабочей базы |
+| `database/seed/inventory_forecast.db` | Версионируемая demo-база |
+| `tests/Feature/ApplicationTest.php` | Интеграционные тесты Laravel |
+| `ml/tests/` | Python-тесты |
 
-Все команды необходимо выполнять из корневой директории проекта.
+## Установка с чистого клона
 
-На macOS PHP, Composer и Python можно установить через Homebrew:
+Все команды выполняются из корня репозитория.
+
+### macOS
 
 ```bash
 brew install php composer python@3.12
+php -v
+composer --version
+python3.12 --version
+php -m | grep -E 'pdo_sqlite|sqlite3|mbstring|zip|gd'
 ```
 
-Установите PHP-зависимости, создайте локальную конфигурацию и ключ приложения:
-
 ```bash
-composer install
+composer install --no-interaction --prefer-dist
 cp .env.example .env
 php artisan key:generate
-```
-
-Создайте отдельное Python-окружение и установите зависимости прогнозирования:
-
-```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-В `.env` укажите абсолютный путь к Python из созданного окружения:
+В `.env` замените стандартное Windows-значение абсолютным путём:
 
 ```dotenv
-ML_PYTHON=/absolute/path/to/project/.venv/bin/python
+ML_PYTHON=/absolute/path/to/luch-magistratura/.venv/bin/python
 ```
 
-Например, узнать корректный путь можно командой:
-
-```bash
-pwd
-```
-
-Затем создайте рабочую SQLite-базу и запустите приложение:
+Путь к корню показывает `pwd`. Затем:
 
 ```bash
 php artisan rayventory:setup
 php artisan serve
 ```
 
-Для фоновой автоматической проверки моделей откройте второй терминал:
+Первый вход выполняется значениями из `.env`:
+
+```dotenv
+RAYVENTORY_ADMIN_EMAIL=admin@rayventory.local
+RAYVENTORY_ADMIN_PASSWORD=<уникальный пароль длиной не менее 12 символов>
+```
+
+Обязательно задайте пароль до первого запуска вне личного компьютера.
+
+Сайт откроется на <http://127.0.0.1:8000>. Для фонового обучения во втором
+терминале:
 
 ```bash
 php artisan queue:work --sleep=2 --tries=1 --timeout=3600
 ```
 
-Приложение будет доступно по адресу `http://127.0.0.1:8000`.
-
-Для уже существующей рабочей базы после обновления проекта выполните:
+Для выполнения расписания очистки в разработке:
 
 ```bash
-php artisan migrate --force
+php artisan schedule:work
 ```
 
-## Локальная установка на Windows
+### Linux
+
+Установите PHP 8.2+, Composer, Python 3.11+, SQLite и PHP-расширения
+`pdo_sqlite`, `mbstring`, `zip`, `gd`. Затем повторите команды macOS, заменив
+`python3.12` доступным интерпретатором версии 3.11 или новее.
+
+### Windows PowerShell
 
 ```powershell
-composer install
+composer install --no-interaction --prefer-dist
 Copy-Item .env.example .env
 php artisan key:generate
-py -m venv .venv
+py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 php artisan rayventory:setup
 php artisan serve
 ```
 
-В `.env` для Windows укажите путь к Python из окружения, например:
+В `.env`:
 
 ```dotenv
-ML_PYTHON=C:\path\to\project\.venv\Scripts\python.exe
+ML_PYTHON=C:\absolute\path\to\luch-magistratura\.venv\Scripts\python.exe
 ```
 
-Команда `rayventory:setup` создаёт рабочую SQLite-базу из поставляемого demo-seed.
-Повторный запуск безопасен и не перезаписывает существующие данные. Для полного
-сброса используйте `php artisan rayventory:setup --force`.
+### PhpStorm
 
-## Запуск из PhpStorm
+Конфигурация **PHP Script**:
 
-Создайте конфигурацию запуска **PHP Script** со следующими параметрами:
+- PHP interpreter: установленный PHP;
+- File: `artisan`;
+- Arguments: `serve`;
+- Working directory: корень репозитория;
+- Interpreter options: пусто.
 
-- **PHP interpreter** — путь к установленному PHP, например `/opt/homebrew/bin/php`;
-- **File** — `artisan`;
-- **Arguments** — `serve`;
-- **Working directory** — корневая директория проекта;
-- **Interpreter options** — оставить пустым.
+Параметр PHP `-c` означает путь к `php.ini`, а не путь к интерпретатору.
 
-Параметр PHP `-c` предназначен для пути к файлу `php.ini`. Не указывайте после
-него путь к исполняемому файлу PHP.
+## Минимальная среда для работы с кодом
 
-## Частые ошибки запуска
-
-Ошибка `Failed opening required vendor/autoload.php` означает, что PHP-зависимости
-ещё не установлены. Выполните в корне проекта:
+Если задача не требует запуска сайта, `.env` и рабочую базу создавать не нужно:
 
 ```bash
-composer install
+composer install --no-interaction --prefer-dist
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+git status --short --branch
 ```
 
-Если команда `composer` не найдена, сначала установите Composer. На macOS:
+После работы снова проверить `git status`. Не удалять и не перезаписывать
+пользовательские изменения в грязном рабочем дереве.
+
+## Проверки
+
+### Быстрый обязательный набор
 
 ```bash
-brew install composer
+composer test
+vendor/bin/pint --test
+.venv/bin/python -m compileall -q ml
 ```
 
-Проверить основные компоненты можно командами:
+На момент написания ожидается не менее `20 tests, 101 assertions`. `phpunit.xml`
+задаёт отдельный тестовый `APP_KEY` и использует SQLite `:memory:`.
 
-```bash
-php -v
-composer --version
-php -m | grep -E 'pdo_sqlite|sqlite3'
-.venv/bin/python --version
-php artisan route:list
-```
-
-## Docker
-
-```bash
-docker compose up --build
-```
-
-`Dockerfile` собирает автономный runtime-образ и не переустанавливает Composer-
-зависимости при запуске. `docker-compose.yml` предназначен для разработки с
-подключённой директорией проекта, поэтому обновляет зависимости перед стартом.
-
-Контейнер самостоятельно устанавливает зависимости, подготавливает рабочую базу
-при первом запуске и поднимает приложение на `http://localhost:8000`. Отдельный
-контейнер `worker` обрабатывает локальные ML-задачи, поэтому интерфейс не зависает
-на время rolling-проверки.
-
-## Структура данных и ML
-
-- `ml/predict_cli.py` — JSON CLI между Laravel и Python;
-- `ml/forecasting.py` — production-прогноз и расчёт рекомендаций;
-- `ml/report_generator.py` — генерация PDF и PPTX;
-- `ml/research/` — воспроизводимый контур данных и архитектуры LSTM, GRU, Transformer;
-- `data/README.md` — загрузка открытого UCI Online Retail II и дополнительных наборов;
-- `database/seed/inventory_forecast.db` — неизменяемая демонстрационная база;
-- `storage/app/rayventory/inventory_forecast.db` — рабочая база приложения;
-- `storage/app/reports` — сформированные отчёты.
-
-Рабочая база и отчёты находятся в `storage` и не попадают в Git. Demo-seed содержит
-синтетическую историю, поэтому приложение явно предупреждает об устаревших данных.
-Перед реальным использованием замените её актуальной историей продаж.
-
-### Исследовательский контур UCI Online Retail II
-
-Нейросетевые эксперименты изолированы от основного runtime, чтобы обычный запуск
-сайта не устанавливал тяжёлый PyTorch. Подготовка окружения и данных:
+### Полный Python-набор
 
 ```bash
 python3.12 -m venv .venv-ml
-.venv-ml/bin/pip install -r requirements-ml.txt
-curl -L -o /tmp/online-retail-ii.zip "https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip"
+.venv-ml/bin/python -m pip install -r requirements-ml.txt
+.venv-ml/bin/python -m compileall -q ml
+.venv-ml/bin/python -m unittest discover -s ml/tests -p 'test_*.py' -v
+```
+
+При запуске всех тестов только из `.venv` Excel-тесты не найдут `openpyxl`, а
+тест нейросетевых архитектур будет пропущен без PyTorch. Используйте `.venv-ml`.
+
+### Дополнительные проверки
+
+```bash
+composer validate --strict
+composer audit --locked --no-interaction
+php artisan route:list --except-vendor
+```
+
+`composer validate --strict` сейчас предупреждает только об отсутствии поля
+`license` в `composer.json`.
+
+### Эквивалент CI
+
+`.github/workflows/quality.yml` использует PHP 8.5 и Python 3.12:
+
+```bash
+composer install --no-interaction --prefer-dist
+python3.12 -m venv .venv-ml
+.venv-ml/bin/python -m pip install -r requirements-ml.txt
+composer test
+vendor/bin/pint --test
+.venv-ml/bin/python -m compileall -q ml
+.venv-ml/bin/python -m unittest discover -s ml/tests -p 'test_*.py'
+docker build -t rayventory-ci .
+```
+
+Тестовый ключ хранится только в `phpunit.xml` и не используется приложением.
+
+## Docker
+
+Compose требует существующий `.env`:
+
+```bash
+cp .env.example .env
+docker compose run --rm app php artisan key:generate --force
+docker compose up --build
+```
+
+В контейнере `ML_PYTHON=python3` уже задан. `app` ставит Composer-зависимости,
+создаёт/мигрирует базу и слушает порт 8000; `worker` обрабатывает очередь. Проект
+монтируется в `/var/www/html`. Изменение системных или Python-зависимостей требует
+пересборки.
+
+```bash
+docker compose ps
+docker compose logs -f app
+docker compose logs -f worker
+docker compose down
+```
+
+Последняя команда останавливает контейнеры без удаления локальной рабочей базы.
+
+## Переменные окружения
+
+| Переменная | Назначение | Значение по умолчанию |
+|---|---|---|
+| `APP_KEY` | Шифрование Laravel | генерируется `key:generate` |
+| `DB_CONNECTION` | Драйвер | `sqlite` |
+| `DB_DATABASE` | Рабочая база | `storage/app/rayventory/inventory_forecast.db` |
+| `QUEUE_CONNECTION` | Фоновые задачи | `database` |
+| `SESSION_LIFETIME` | Таймаут неактивной сессии | `120` минут |
+| `SESSION_EXPIRE_ON_CLOSE` | Завершать сессию при закрытии браузера | `true` |
+| `SESSION_ENCRYPT` | Шифровать содержимое сессии | `true` |
+| `SESSION_SECURE_COOKIE` | Передавать cookie только по HTTPS | локально `false`, production `true` |
+| `SESSION_SAME_SITE` | Защита cookie от межсайтовых запросов | `lax` |
+| `HASH_DRIVER` | Хеширование паролей | `argon2id` |
+| `RAYVENTORY_ADMIN_EMAIL` | Email первого администратора | `admin@rayventory.local` |
+| `RAYVENTORY_ADMIN_PASSWORD` | Пароль первого администратора | заменить перед установкой |
+| `ML_PYTHON` | Python runtime | в шаблоне `py`; локально указать `.venv` |
+| `ML_RESEARCH_PYTHON` | Python исследований | fallback на `ML_PYTHON` |
+| `ML_ENGINE_PATH` | Production CLI | `ml/predict_cli.py` |
+| `ML_DB_PATH` | База для Python | fallback на `DB_DATABASE` |
+| `ML_REPORTS_PATH` | PDF/PPTX | `storage/app/reports` |
+| `ML_MODEL_REGISTRY_PATH` | Реестр моделей | `storage/app/model-registry/registry.json` |
+| `ML_MODELS_PATH` | Runtime-артефакты | `storage/app/models` |
+| `ML_LOCAL_DATA_PATH` | Локальный датасет | `data/processed/local-inventory` |
+| `ML_DATASET_ANALYSIS_PATH` | EDA-профиль | `storage/app/dataset-analysis/latest.json` |
+| `ML_TUNING_PATH` | Результаты tuning | `storage/app/tuning` |
+| `ML_SCENARIOS_PATH` | Сценарные benchmark | `storage/app/scenarios` |
+| `ML_TRAINING_TIMEOUT` | Таймаут обучения | `3600` секунд |
+| `ML_TIMEOUT` | Таймаут runtime | `120` секунд |
+
+После изменения `.env`:
+
+```bash
+php artisan config:clear
+```
+
+## База и пользовательские данные
+
+```bash
+php artisan rayventory:setup
+```
+
+Команда создаёт каталог, копирует demo-seed только при отсутствии рабочей базы и
+применяет миграции. Для существующей базы:
+
+```bash
+php artisan migrate --force
+```
+
+Полный сброс является разрушительным:
+
+```bash
+php artisan rayventory:setup --force
+```
+
+### Филиалы и пользователи
+
+Администратор создаёт филиал кнопкой `+` рядом с переключателем филиала. Раздел
+`/settings` создаёт пользователей выбранного филиала и назначает роль:
+
+- `admin` — управление организацией и любые действия;
+- `analyst` — импорт, прогнозы, обучение и модели;
+- `purchaser` — просмотр и выгрузка плана закупок;
+- `viewer` — только чтение.
+
+Каждый API-запрос содержит `X-Branch-ID`; сервер проверяет членство пользователя,
+а не доверяет идентификатору из браузера. Изменяющие запросы записываются в
+`audit_logs`.
+
+### Безопасность production
+
+- Публикуйте приложение только за HTTPS и задайте `APP_ENV=production`,
+  `APP_DEBUG=false`, `SESSION_SECURE_COOKIE=true`.
+- Создайте новый `APP_KEY` на целевом сервере и не копируйте его в Git.
+- Укажите уникальный `RAYVENTORY_ADMIN_PASSWORD` до первого запуска миграций;
+  production-seeder отклоняет отсутствующий или слишком короткий пароль.
+- Пароли хешируются Argon2id; новые пароли должны содержать не менее 12 символов,
+  буквы обоих регистров, цифру и специальный символ.
+- Вход ограничен пятью неудачными попытками в минуту для пары email/IP. Успешные
+  и неуспешные попытки фиксируются в серверном журнале без открытого email.
+- Cookie сессии имеет флаги `HttpOnly` и `SameSite`, содержимое сессии шифруется,
+  идентификатор обновляется после входа и смены пароля. Постоянный `remember me`
+  намеренно отключён.
+- Для публичного размещения дополнительно необходимы MFA, централизованный сбор
+  и оповещения по журналам, резервное копирование, ротация секретов и проверка
+  reverse proxy. Эти меры зависят от инфраструктуры и не заменяются кодом формы.
+
+### Excel-импорт
+
+Пользовательский импорт через `/inventory`:
+
+1. скачать пустой шаблон или заполненный пример;
+2. заполнить `Товары`, `Продажи`, `Остатки`, `Поставки`;
+3. загрузить `.xlsx` до 20 МБ;
+4. проверить preview и влияние на базу;
+5. отдельно подтвердить импорт.
+
+Preview не изменяет базу. Подтверждение заменяет продажи и остатки только
+активного филиала и никогда не удаляет данные остальных филиалов. Одновременные
+импорты одного филиала блокируются. Перед заменой создаётся резервная копия.
+Внешний идентификатор товара — общий SKU, а не внутренний ID SQLite.
+
+Очистка временных артефактов:
+
+```bash
+php artisan rayventory:cleanup
+```
+
+Команда удаляет просроченные previews, jobs, отчёты и историю, сохраняя десять
+последних резервных копий. Scheduler запускает её ежедневно в 03:30.
+
+## Production ML runtime
+
+Laravel запускает `ml/predict_cli.py` отдельным процессом. Действия:
+
+```text
+simulate  — прогноз одного товара с overrides
+planning  — общий план закупок
+report    — создание PDF/PPTX
+```
+
+Обмен выполняется одной JSON-строкой, payload обычно передаётся в Base64. Нельзя
+добавлять отладочный вывод в stdout CLI: это сломает JSON-протокол. Диагностику
+направлять в stderr.
+
+Laravel передаёт `ML_BRANCH_ID`; Python фильтрует `branch_products`, продажи,
+остатки и поставки до построения прогноза. Артефакты моделей и отчётов хранятся
+в филиальных подкаталогах.
+
+Встроенная модель — `seasonal-robust-v1` с диапазоном q10–q90. При повреждённом
+или несовместимом реестре runtime возвращается к baseline с предупреждением.
+
+## Исследовательский ML-контур
+
+Исследования отделены от runtime, чтобы обычный запуск не требовал PyTorch.
+Создайте `.venv-ml` по инструкции тестирования и задайте:
+
+```dotenv
+ML_RESEARCH_PYTHON=/absolute/path/to/luch-magistratura/.venv-ml/bin/python
+```
+
+```bash
+.venv-ml/bin/python ml/research_cli.py --help
+.venv-ml/bin/python ml/research_cli.py <command> --help
+```
+
+Команды: `prepare-m5`, `prepare-uci`, `prepare-local`, `prepare-excel`, `analyze`,
+`tune`, `scenarios`, `train`, `scale`, `report`.
+
+### Локальная SQLite
+
+Минимум для SKU — 175 дней, рекомендуется 365:
+
+```bash
+.venv-ml/bin/python ml/research_cli.py prepare-local
+.venv-ml/bin/python ml/research_cli.py train \
+  --data data/processed/local-inventory/local_inventory.csv.gz \
+  --manifest data/processed/local-inventory/manifest.json
+```
+
+SQLite открывается только для чтения; производные файлы идут в `data/processed/`.
+
+### UCI Online Retail II
+
+```bash
+curl -L -o /tmp/online-retail-ii.zip \
+  'https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip'
 mkdir -p data/raw/uci-online-retail
 unzip /tmp/online-retail-ii.zip -d data/raw/uci-online-retail
 .venv-ml/bin/python ml/research_cli.py prepare-uci --series 300 --seed 42
 .venv-ml/bin/python ml/research_cli.py analyze \
   --data data/processed/uci-online-retail/uci_online_retail_subset.csv.gz \
   --manifest data/processed/uci-online-retail/manifest.json
-```
-
-После подготовки запускается единый эксперимент:
-
-```bash
 .venv-ml/bin/python ml/research_cli.py train
 ```
 
-Воспроизводимый подбор гиперпараметров запускается отдельно:
-
-```bash
-# Быстрая проверка контура: по одной конфигурации каждой архитектуры
-.venv-ml/bin/python ml/research_cli.py tune --preset smoke --epochs 3 --folds 1
-
-# Исследовательский запуск: 24 конфигурации и три rolling-окна
-.venv-ml/bin/python ml/research_cli.py tune --preset full --epochs 30 --patience 5 --folds 3
-```
-
-Полный grid изменяет размер скрытого состояния, learning rate и длину истории для
-LSTM, GRU и Transformer. Каждая конфигурация получает отдельный воспроизводимый
-эксперимент. Итоговый файл в `storage/app/tuning/TUNE-*/result.json` фиксирует
-WAPE, время обучения, число параметров, лучшую конфигурацию каждой архитектуры и
-общего победителя. Равные результаты разрешаются сначала по времени, затем по
-числу параметров. Страница `/experiments` показывает сравнительную таблицу.
-
-Контролируемое исследование применимости моделей запускается командой:
-
-```bash
-.venv-ml/bin/python ml/research_cli.py scenarios \
-  --models lstm gru transformer --epochs 30 --patience 5 --folds 3
-```
-
-Заполненный Excel-пример можно исследовать напрямую, не импортируя и не заменяя
-рабочую базу:
+### Excel без изменения рабочей базы
 
 ```bash
 .venv-ml/bin/python ml/research_cli.py prepare-excel \
@@ -235,320 +440,140 @@ WAPE, время обучения, число параметров, лучшую
   --models lstm gru transformer --epochs 30 --patience 5 --folds 3
 ```
 
-Проверка масштабируемости на 10, 100 и 300 рядах выполняется командой `scale`.
-Команда `report` объединяет основной, сценарный и нагрузочный эксперименты,
-формирует итоговые рекомендации, Markdown-сводку и SVG-графики факта и прогноза
-LSTM, GRU и Transformer. Последний пакет отображается на странице `/experiments`.
-
-Генератор с фиксированным seed создаёт четыре независимых набора: выраженная
-календарная сезонность, линейный тренд, периодические промо и внешний сценарий с
-изменением цены и событиями. Для каждого сценария сохраняются результаты всех
-baseline и нейросетей, победитель, лучшая нейронная архитектура, WAPE, время и
-сложность. Контролируемые наборы нужны для анализа применимости; они не заменяют
-финальное тестирование на реальных данных.
-
-Команда `analyze` формирует воспроизводимый EDA-профиль: качество и объём данных,
-долю нулевого спроса, распределение Syntetos–Boylan, недельную автокорреляцию,
-портфельный тренд, эффект событий и промо, связь цены со спросом и время обработки.
-Результат сохраняется в `storage/app/dataset-analysis/latest.json` и отображается
-на `/experiments`. Это связывает выбор архитектуры с характеристиками данных,
-как требуется планом исследования.
-
-Он сравнивает три понятных baseline (`seasonal naive`, медиана за 28 дней и
-Croston-SBA для прерывистого спроса), адаптивный выбор baseline, калибровку риска и нейронные
-LSTM, GRU и Transformer на одинаковых
-временных train/validation/test-периодах. По умолчанию используются три последовательных
-rolling-окна; допустимо от одного до шести через `--folds`. Нормализация
-рассчитывается заново только по train каждого окна, нейросети обучаются с Pinball
-Loss и early stopping. Результат содержит среднее и стандартное отклонение метрик,
-loss по эпохам, веса, параметры и версии окружения и сохраняется в
-`storage/app/experiments/EXP-*/`.
-
-Для эксперимента на собственных импортированных данных вместо UCI выполните:
+### Tuning и сценарии
 
 ```bash
-.venv-ml/bin/python ml/research_cli.py prepare-local
-.venv-ml/bin/python ml/research_cli.py train \
-  --data data/processed/local-inventory/local_inventory.csv.gz \
-  --manifest data/processed/local-inventory/manifest.json
+# Smoke
+.venv-ml/bin/python ml/research_cli.py tune \
+  --preset smoke --epochs 3 --folds 1
+
+# Длительные полные запуски
+.venv-ml/bin/python ml/research_cli.py tune \
+  --preset full --epochs 30 --patience 5 --folds 3
+.venv-ml/bin/python ml/research_cli.py scenarios \
+  --models lstm gru transformer --epochs 30 --patience 5 --folds 3
 ```
 
-База открывается только для чтения, а производный набор остаётся в локальном
-каталоге, исключённом из Git. Экран `/experiments` заранее показывает период,
-число готовых SKU и недостающую глубину истории. Минимум — 175 дней, рекомендуемый
-период — 365 дней.
+`scale` проверяет 10/100/300 рядов. `report` объединяет эксперименты, сценарии и
+масштабирование в Markdown и SVG.
 
-Вход нейросети включает продажи и цену, календарные признаки, rolling-средние за
-7 и 28 дней, rolling-разброс, долю дней с продажами и время с последней продажи.
-Все rolling-признаки строятся только из доступной на момент прогноза истории.
-Адаптивный baseline выбирает метод отдельно для каждого типа спроса по validation-
-периоду и затем применяет зафиксированный выбор к test-периоду.
+Сравниваются seasonal naive, медиана 28 дней, Croston-SBA, адаптивные baseline и
+LSTM/GRU/Transformer. Нормализация строится только по train каждого rolling-окна,
+выбор маршрута — по validation, финальные метрики — по более позднему test. Нельзя
+допускать утечку будущих данных при изменении pipeline.
 
-`risk_calibrated_router` дополнительно подбирает на validation-периоде безопасный
-множитель прогноза. Метрика `Недопрогноз` показывает долю фактического спроса,
-которую прогноз не покрыл. `Риск-штраф` считает недопрогноз вдвое дороже
-перепрогноза — это прозрачная исследовательская модель стоимости дефицита, а не
-реальная сумма убытка. Основной рейтинг по-прежнему строится по WAPE, поэтому
-снижение риска нельзя выдать за безусловное повышение точности.
+## Реестр и публикация моделей
 
-Сохранённые результаты доступны на странице `/experiments`. Она формирует рейтинг
-по среднему WAPE и отдельно показывает разброс, Bias, интервальное покрытие, время
-обучения и количество параметров. Точность также разбивается по характеру спроса:
-стабильный, прерывистый, нестабильный и нерегулярный. Тип определяется только по
-истории обучающего периода через ADI и квадрат коэффициента вариации, поэтому при
-оценке нет утечки будущих данных. Одно тестовое окно явно помечается как
-недостаточное для научного вывода.
+Candidate проверяется на минимум трёх rolling-окнах, корректность метрик,
+локальное происхождение данных и совместимость с runtime. Модель на UCI нельзя
+публиковать в production. Локальные роутеры упаковываются в
+`local-demand-router-v1`. Публикация требует явного `PROMOTE`, предыдущая версия
+архивируется.
 
-Кандидат становится новой production-моделью только после устойчивой победы над
-baseline на нескольких rolling-окнах. Сам факт использования нейросети не считается
-улучшением: для разреженного спроса простая медиана или Croston могут быть точнее.
-
-### Реестр и безопасная публикация моделей
-
-На странице `/experiments` результат можно зарегистрировать как `candidate`.
-Реестр проверяет минимум три rolling-окна, корректность WAPE и совместимость
-артефакта с production runtime. Пока исследовательская модель обучена на UCI, её
-публикация блокируется — она не может незаметно изменить рекомендации закупок.
-Для локального эксперимента `adaptive_demand_router` и
-`risk_calibrated_router` упаковываются в версионированный JSON-артефакт
-`local-demand-router-v1`: в нём сохраняются проверенные маршруты по типам спроса
-и коэффициенты калибровки. После прохождения проверок кнопка **Опубликовать**
-переводит кандидата в production, а прежнюю версию — в архив.
-
-Действующей production-версией остаётся встроенный `seasonal-robust-v1`. Python
-проверяет реестр при каждом расчёте. Если файл повреждён, production-запись
-отсутствует или формат модели не поддерживается, движок автоматически использует
-baseline и возвращает пользователю предупреждение. При будущей публикации прежняя
-production-версия переводится в `archived`, поэтому история выбора сохраняется.
-
-### Автоматический локальный ML-цикл
-
-После подтверждённого Excel-импорта система проверяет глубину истории. Если хотя
-бы один SKU содержит минимум 175 дней, фоновая задача автоматически:
-
-1. создаёт приватный набор из рабочей SQLite;
-2. сравнивает seasonal naive, медиану, Croston и demand-aware варианты на трёх
-   rolling-окнах без установки PyTorch;
-3. сохраняет воспроизводимый эксперимент;
-4. упаковывает `risk_calibrated_router` и регистрирует его как candidate;
-5. оставляет публикацию за явным подтверждением пользователя.
-
-Статусы `queued`, `preparing`, `analyzing`, `evaluating`, `review_required`, `blocked`,
-`skipped` и `failed` отображаются на `/experiments`. Повторный запуск не создаётся,
-пока предыдущий активен. Нейросетевые эксперименты остаются отдельным более
-тяжёлым исследовательским процессом и не задерживают импорт.
-
-## Загрузка данных из Excel
-
-SQLite используется как внутреннее рабочее хранилище, но пользователю не нужно
-редактировать базу вручную. Основной способ загрузки исходных данных:
-
-1. откройте раздел **Склад**;
-2. скачайте **Пустой шаблон** или откройте **Заполненный пример**;
-3. прочитайте лист `Инструкция`;
-4. заполните листы `Товары`, `Продажи`, `Остатки` и `Поставки`;
-5. выберите `.xlsx` и нажмите **Проверить файл**;
-6. изучите найденный период, склады, количество строк, разницу с текущей базой,
-   примеры распознанных товаров и предупреждения;
-7. нажмите **Подтвердить импорт**, только если сводка корректна.
-
-Пустой шаблон предназначен для рабочих данных. Отдельный исследовательский пример
-содержит 8 товаров и 365 дней непрерывной истории: 2 920 строк продаж. Каждый SKU
-демонстрирует отдельный сценарий из ИУП: стабильный спрос, недельную или годовую
-сезонность, растущий тренд, промо-эффект, прерывистый спрос, нерегулярные крупные
-заказы либо праздничные всплески. В примере также есть периоды отсутствия товара,
-текущие остатки и ожидаемые поставки. Назначение каждого сценария объяснено на
-листе `Инструкция`, поэтому файл можно использовать и для знакомства с форматом,
-и как воспроизводимый набор для сравнения моделей. Минимум для базового прогноза —
-90 дней на каждый SKU; для определения сезонности рекомендуется 12 месяцев. Одна
-строка на листе `Продажи` означает продажи одного SKU за день.
-
-Внешним идентификатором товара служит пользовательский `SKU`, а не внутренний ID
-базы. Остатки содержат склад, дату состояния и резерв. Поставки содержат номер,
-ожидаемую дату, статус и поставщика.
-
-Файл принимается только после полной проверки. Проверяются названия листов и
-столбцов, типы значений, уникальность ID, связи продаж и остатков с товарами,
-формат дат и наличие остатка для каждого товара. Максимальный размер — 20 МБ,
-максимум — 100 000 строк на лист. Если обнаружена ошибка, импорт отменяется и
-текущая рабочая база не изменяется. Загрузка файла выполняет только предварительную
-проверку; запись начинается после отдельного подтверждения. Перед успешной заменой
-создаётся резервная копия SQLite, а результат сохраняется в журнале импортов.
-
-## Автоматические проверки
-
-Workflow `.github/workflows/quality.yml` запускается для каждого push и pull
-request. Он выполняет PHPUnit, проверку стиля PHP, компиляцию Python-модулей и
-отдельную сборку Docker-образа. Локально основной набор можно запустить командой:
-
-```bash
-composer test
-```
-
-## Планирование закупок
-
-Раздел **К закупке** превращает прогноз спроса в готовый список действий. Для
-каждого SKU система показывает рекомендуемое количество, стоимость, срок
-поставки, ожидаемую дату дефицита, качество данных и объяснение расчёта.
-
-Рабочий сценарий:
-
-1. нажмите **Пересчитать**, чтобы получить план на актуальных данных;
-2. при необходимости укажите доступную сумму в блоке **Бюджет закупки**;
-3. нажмите **Распределить бюджет** — сначала будут профинансированы позиции с
-   ближайшим риском дефицита, затем остальные рекомендации по приоритету;
-4. проверьте календарь: он группирует заказы по дате, когда их необходимо
-   разместить с учётом срока поставки;
-5. нажмите **Скачать заказ Excel**, чтобы получить готовый файл для согласования
-   или отправки поставщику.
-
-Excel-заказ содержит листы `Сводка` и `Заказ`. Количества и цены записываются как
-числа, суммы строк и общий итог рассчитываются формулами. Перед выгрузкой сервер
-повторно получает актуальный план и не позволяет заказать больше рекомендованного
-количества. Если рекомендаций нет, корзина и календарь остаются пустыми — это
-нормально и означает, что при текущем прогнозе закупка пока не требуется.
-
-## Адаптация и здоровье модели
-
-После подтверждённого Excel-импорта система автоматически запускает backtesting на
-отложенном периоде и сохраняет снимок WAPE, Bias и покрытия q10–q90. Экран
-**Здоровье модели** показывает актуальность исходных данных, сравнение WAPE с
-предыдущей оценкой и историю пересчётов. Данные старше 7 дней получают
-предупреждение, старше 30 дней — критический статус. Если истории недостаточно,
-система честно помечает метрики как недоступные и не заявляет об улучшении модели.
-
-## Карта системы
-
-```text
-                                      ╱──────────────╱│
-                                     ╱  Python ML   ╱ │
-                                    ╱──────────────╱  │
-                                    │ forecast +   │  │
-                                    │ PDF / PPTX   │ ╱
-                                    │──────────────│╱
-                                           ▲  │
-                      action + payload-b64 │  │ JSON result
-                                           │  ▼
-       ╱──────────────╱│             ╱──────────────╱│
-      ╱   Browser    ╱ │  HTTP/JSON  ╱   Laravel   ╱ │
-     ╱──────────────╱  │◄──────────►╱──────────────╱  │
-     │ Blade pages  │  │            │ routes/API   │  │
-     │ + app.js     │ ╱             │ + MlBridge   │ ╱
-     │──────────────│╱              │──────────────│╱
-                                           │  ▲
-                             SQL read/write│  │ rows
-                                           ▼  │
-                                    ╱──────────────╱│
-                                   ╱    SQLite    ╱ │
-                                  ╱──────────────╱  │
-                                  │ products +   │  │
-                                  │ sales/stock  │ ╱
-                                  │──────────────│╱
-                                           │
-                                           │ generated artifacts
-                                           ▼
-                                    ╱──────────────╱│
-                                   ╱   Storage    ╱ │
-                                  ╱──────────────╱  │
-                                  │ jobs + PDF   │  │
-                                  │ + PPTX       │ ╱
-                                  │──────────────│╱
-```
-
-### Легенда
-
-- **Browser** — пользовательский интерфейс, Blade-страницы и JavaScript-клиент;
-- **Laravel** — HTTP-маршрутизация, валидация, работа с остатками и запуск ML;
-- **Python ML** — прогнозирование спроса и генерация отчётов;
-- **SQLite** — единый источник товаров, продаж, остатков и товара в пути;
-- **Storage** — состояния расчётов и сформированные PDF/PPTX-файлы;
-- `►` — направление вызова или передаваемых данных.
-
-### Реальные потоки управления и данных
-
-1. Браузер запрашивает показатели и остатки через `/api/dashboard-stats` и
-   `/api/stock`. Laravel читает таблицы `products` и `warehouse_stock`, после чего
-   возвращает JSON. Клиент отображает карточки, таблицы и графики
-   ([public/js/app.js](public/js/app.js), [routes/api.php](routes/api.php),
-   [ApiController.php](app/Http/Controllers/ApiController.php)).
-2. Обновление остатка идёт как JSON `{product_id, quantity}` в
-   `/api/stock/update`; контроллер валидирует payload и записывает значение в
-   `warehouse_stock` ([ApiController.php](app/Http/Controllers/ApiController.php),
-   [WarehouseStock.php](app/Models/WarehouseStock.php)).
-3. Симулятор отправляет `{product_id, overrides}` в `/api/simulate`.
-   `MlBridge` запускает Python-процесс с действием
-   `simulate` и Base64-кодированным JSON, а также передаёт `ML_DB_PATH` и
-   `ML_REPORTS_PATH` ([MlBridge.php](app/Services/MlBridge.php),
-   [predict_cli.py](ml/predict_cli.py), [config/rayventory.php](config/rayventory.php)).
-4. Python читает из SQLite товары, историю продаж, остатки и поставки в пути,
-   рассчитывает прогноз `demand/q10/q90`, остаток и safety stock, затем возвращает
-   одну JSON-строку в Laravel ([forecasting.py](ml/forecasting.py)).
-5. Для отчёта браузер передаёт `{type, formats}` в `/api/generate-report`.
-   Python сохраняет PDF/PPTX в `storage/app/reports`, Laravel возвращает имена
-   артефактов, а скачивание проходит через проверенный маршрут
-   `/download/reports/{filename}` ([report_generator.py](ml/report_generator.py),
-   [routes/web.php](routes/web.php), [ApiController.php](app/Http/Controllers/ApiController.php)).
-6. Команда `rayventory:setup` один раз копирует поставляемый demo-seed в рабочую
-   SQLite-базу; повторный запуск без `--force` не перезаписывает данные
-   ([routes/console.php](routes/console.php),
-   [config/database.php](config/database.php)).
-
-## Конфигурация
-
-В стандартной установке достаточно указать `ML_PYTHON`. При необходимости пути
-можно переопределить переменными:
-
-- `DB_DATABASE` — рабочая SQLite-база Laravel;
-- `ML_DB_PATH` — SQLite-база для Python, по умолчанию совпадает с рабочей базой;
-- `ML_ENGINE_PATH` — путь к Python CLI;
-- `ML_REPORTS_PATH` — каталог отчётов;
-- `ML_MODEL_REGISTRY_PATH` — JSON-реестр production и candidate-моделей;
-- `ML_MODELS_PATH` — каталог версионированных production-артефактов;
-- `ML_RESEARCH_PYTHON` — Python для локального исследовательского конвейера;
-- `ML_LOCAL_DATA_PATH` — каталог приватного производного набора;
-- `ML_DATASET_ANALYSIS_PATH` — последний воспроизводимый EDA-профиль;
-- `ML_TUNING_PATH` — каталог результатов подбора гиперпараметров;
-- `ML_SCENARIOS_PATH` — каталог контролируемых сценарных экспериментов;
-- `ML_TRAINING_TIMEOUT` — максимальное время фонового эксперимента;
-- `ML_TIMEOUT` — таймаут Python-процесса в секундах.
+После Excel-импорта при достаточной истории очередь создаёт приватный датасет,
+оценивает baseline, регистрирует candidate и ждёт ручной публикации. Для этого
+должен работать `queue:work`.
 
 ## API
 
-- `GET /api/dashboard-stats` — показатели склада;
-- `GET /api/stock` — товары и остатки;
-- `POST /api/stock/update` — обновление остатка;
-- `POST /api/inventory/import/preview` — безопасная предварительная проверка Excel;
-- `POST /api/inventory/import/confirm` — подтверждение проверенного импорта;
-- `GET /api/purchase-plan` — план закупок, качество данных и объяснимые действия;
-- `POST /api/purchase-plan/export` — проверка корзины и выгрузка заказа в XLSX;
-- `POST /api/simulate` — синхронный прогноз SKU;
-- `POST /api/generate-report` — создание PDF/PPTX;
-- `GET /api/models` — production-модель и зарегистрированные кандидаты;
-- `GET /api/training-readiness` — готовность локальной истории к ML-эксперименту;
-- `GET /api/training-pipeline` — состояние последнего автоматического запуска;
-- `GET /api/dataset-analysis` — последний профиль исследовательского набора;
-- `GET /api/tuning` — последний результат подбора гиперпараметров;
-- `GET /api/scenarios` — результаты проверки применимости моделей по сценариям;
-- `POST /api/training-pipeline` — ручной запуск локального конвейера;
-- `POST /api/models/candidates` — регистрация результата эксперимента;
-- `POST /api/models/{id}/promote` — публикация прошедшего проверки кандидата;
-- `GET /download/reports/{filename}` — безопасное скачивание отчёта.
+| Метод и путь | Назначение |
+|---|---|
+| `GET/POST /api/branches` | Список/создание филиалов |
+| `GET /api/branches-summary` | Центральная сводка |
+| `GET/POST /api/users` | Пользователи и роли |
+| `GET /api/dashboard-stats` | Показатели склада |
+| `GET /api/stock` | Товары и остатки |
+| `POST /api/stock/update` | Обновить остаток |
+| `GET /api/purchase-plan` | Рассчитать закупки |
+| `POST /api/purchase-plan/export` | Скачать план Excel |
+| `POST /api/simulate` | Синхронная симуляция |
+| `POST /api/generate-report` | Создать PDF/PPTX |
+| `POST /api/inventory/import/preview` | Проверить Excel |
+| `POST /api/inventory/import/confirm` | Подтвердить импорт |
+| `GET /api/model-health` | Последняя оценка модели |
+| `GET /api/training-readiness` | Готовность локальных данных |
+| `GET/POST /api/training-pipeline` | Статус/запуск pipeline |
+| `GET /api/experiments` | Эксперименты |
+| `GET /api/models` | Реестр моделей |
+| `POST /api/models/candidates` | Создать candidate |
+| `POST /api/models/{id}/promote` | Опубликовать модель |
+| `GET /api/dataset-analysis` | EDA-профиль |
+| `GET /api/tuning` | Последний tuning |
+| `GET /api/scenarios` | Последний benchmark |
+| `GET /api/research-report` | Исследовательский отчёт |
 
-## Проверка
+Актуальный список: `php artisan route:list --except-vendor`.
+
+## Локальные артефакты
+
+| Каталог | Содержимое |
+|---|---|
+| `storage/app/rayventory/` | Рабочая SQLite |
+| `storage/app/branches/{id}/` | Preview, история и backup импорта филиала |
+| `storage/app/reports/branches/{id}/` | PDF/PPTX филиала |
+| `storage/app/model-health/branches/{id}/` | Снимки backtesting |
+| `storage/app/model-registry/branches/{id}/` | Реестр моделей |
+| `storage/app/models/branches/{id}/` | Runtime-артефакты |
+| `storage/app/training-jobs/branches/{id}/` | Состояния обучения |
+| `storage/app/experiments/branches/{id}/` | Эксперименты |
+| `storage/app/tuning/branches/{id}/` | Tuning |
+| `storage/app/scenarios/branches/{id}/` | Benchmarks |
+| `storage/app/research-report/branches/{id}/` | Сводки и графики |
+| `data/raw/` | Внешние данные |
+| `data/processed/` | Производные наборы |
+
+Не коммитить реальные складские данные, отчёты, модели, `.env`, ключи, токены и
+пользовательские Excel-файлы.
+
+## Типичные ошибки
+
+`Failed opening required vendor/autoload.php`:
 
 ```bash
-composer test
-php artisan route:list
-php artisan view:cache
-vendor/bin/pint --test
-node --check public/js/app.js
-python -m compileall -q ml
+composer install --no-interaction --prefer-dist
 ```
 
-## Обслуживание storage
+`MissingAppKeyException` при запуске сайта:
 
-Команда `php artisan rayventory:cleanup` удаляет preview-файлы старше суток,
-ML-job-файлы старше 7 дней, отчёты старше 30 дней, историю импортов старше года
-и оставляет только 10 последних резервных копий базы. Планировщик запускает её
-ежедневно в 03:30; для автоматического выполнения на сервере должен работать
-стандартный Laravel scheduler.
+```bash
+test -f .env || cp .env.example .env
+php artisan key:generate
+```
+
+В PHPUnit используется отдельный безопасный ключ из `phpunit.xml`.
+
+`Could not open input file: artisan`: команда запущена не из корня проекта.
+
+Проблемы Python:
+
+```bash
+.venv/bin/python --version
+.venv/bin/python -c 'import numpy, pandas, matplotlib, reportlab, pptx'
+php artisan config:clear
+```
+
+`No module named openpyxl` или `torch`: нужен `.venv-ml` с
+`requirements-ml.txt`.
+
+Проблемы SQLite:
+
+```bash
+php -m | grep -E 'pdo_sqlite|sqlite3'
+php artisan rayventory:setup
+```
+
+Очередь остаётся в `queued`: запустить `php artisan queue:work` и проверить
+`storage/logs/laravel.log`.
+
+## Безопасный порядок изменений
+
+1. Проверить `git status --short --branch`.
+2. Читать только относящиеся к задаче route/controller/service/test.
+3. Не трогать demo-seed и пользовательские артефакты.
+4. Внести минимальное изменение и обновить тест.
+5. Запустить PHPUnit, Pint и релевантные Python-тесты.
+6. Проверить diff и отсутствие временных файлов в Git.
+
+При изменении контракта Laravel ↔ Python синхронно проверять `MlBridge`,
+`predict_cli.py`, JavaScript-клиент и тесты. При изменении схемы добавлять новую
+миграцию, не переписывать существующую рабочую базу вручную.

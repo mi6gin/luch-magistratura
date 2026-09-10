@@ -10,10 +10,13 @@ use Throwable;
 
 class MlBridge
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function simulate(int $productId = 1, array $overrides = []): array
     {
         return $this->run('simulate', [
             'product_id' => $productId,
+            'branch_id' => $this->branches->id(),
             'overrides' => $overrides,
         ]);
     }
@@ -23,12 +26,13 @@ class MlBridge
         return $this->run('report', [
             'type' => $type,
             'formats' => $formats,
+            'branch_id' => $this->branches->id(),
         ]);
     }
 
     public function planning(): array
     {
-        return $this->run('planning', ['scope' => 'portfolio']);
+        return $this->run('planning', ['scope' => 'portfolio', 'branch_id' => $this->branches->id()]);
     }
 
     private function run(string $action, array $payload): array
@@ -43,9 +47,10 @@ class MlBridge
 
         $process = new Process($arguments, base_path(), [
             'ML_DB_PATH' => (string) config('rayventory.database_path'),
-            'ML_REPORTS_PATH' => (string) config('rayventory.reports_path'),
-            'ML_MODEL_REGISTRY_PATH' => (string) config('rayventory.model_registry_path'),
-            'ML_MODELS_PATH' => (string) config('rayventory.models_path'),
+            'ML_BRANCH_ID' => (string) $this->branches->id(),
+            'ML_REPORTS_PATH' => $this->branches->scopedPath((string) config('rayventory.reports_path')),
+            'ML_MODEL_REGISTRY_PATH' => $this->branches->scopedPath(dirname((string) config('rayventory.model_registry_path'))).'/registry.json',
+            'ML_MODELS_PATH' => $this->branches->scopedPath((string) config('rayventory.models_path')),
         ]);
         $process->setTimeout((float) config('rayventory.timeout', 120));
         try {

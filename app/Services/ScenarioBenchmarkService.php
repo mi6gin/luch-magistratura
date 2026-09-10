@@ -6,9 +6,11 @@ use Illuminate\Support\Facades\File;
 
 class ScenarioBenchmarkService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function latest(): ?array
     {
-        $directory = (string) config('rayventory.scenarios_path', storage_path('app/scenarios'));
+        $directory = $this->branches->scopedPath((string) config('rayventory.scenarios_path', storage_path('app/scenarios')));
         if (! File::isDirectory($directory)) {
             return null;
         }

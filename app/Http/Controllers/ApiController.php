@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Branch;
 use App\Models\Product;
+use App\Models\User;
 use App\Models\WarehouseStock;
+use App\Services\BranchContext;
 use App\Services\DatasetAnalysisService;
 use App\Services\InventoryExcelService;
 use App\Services\LocalModelPipelineService;
@@ -18,7 +21,10 @@ use App\Services\ScenarioBenchmarkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rules\Password;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -36,7 +42,96 @@ class ApiController extends Controller
         private readonly ResearchTuningService $tuning,
         private readonly ScenarioBenchmarkService $scenarios,
         private readonly ResearchReportService $researchReport,
+        private readonly BranchContext $branches,
     ) {}
+
+    public function branches(): JsonResponse
+    {
+        $query = Branch::query()->where('active', true)->orderBy('name');
+        if (! request()->user()?->is_admin) {
+            $query->whereIn('id', request()->user()->branches()->pluck('branches.id'));
+        }
+
+        return response()->json([
+            'active_branch_id' => $this->branches->id(),
+            'branches' => $query->get(['id', 'organization_id', 'name', 'code']),
+        ]);
+    }
+
+    public function createBranch(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->is_admin, 403, 'Только администратор может создавать филиалы.');
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'code' => ['nullable', 'string', 'max:40', 'regex:/^[a-z0-9-]+$/', 'unique:branches,code'],
+        ]);
+        $code = $data['code'] ?? str()->slug($data['name']);
+        abort_if($code === '', 422, 'Не удалось сформировать код филиала.');
+        abort_if(Branch::where('organization_id', $this->branches->resolve()->organization_id)->where('code', $code)->exists(), 422, 'Филиал с таким кодом уже существует.');
+        $branch = Branch::create([
+            'organization_id' => $this->branches->resolve()->organization_id,
+            'name' => $data['name'], 'code' => $code, 'active' => true,
+        ]);
+        $request->user()->branches()->syncWithoutDetaching([$branch->id => ['role' => 'admin']]);
+
+        return response()->json(['success' => true, 'branch' => $branch], 201);
+    }
+
+    public function branchesSummary(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->is_admin, 403);
+        $summary = Branch::query()->where('active', true)->orderBy('name')->get()->map(function (Branch $branch): array {
+            return [
+                'id' => $branch->id, 'name' => $branch->name,
+                'products' => DB::table('branch_products')->where('branch_id', $branch->id)->count(),
+                'sales_rows' => DB::table('sales_history')->where('branch_id', $branch->id)->count(),
+                'stock_units' => (int) DB::table('warehouse_stock')->where('branch_id', $branch->id)->sum('current_quantity'),
+            ];
+        });
+
+        return response()->json(['branches' => $summary]);
+    }
+
+    public function users(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->is_admin, 403);
+
+        return response()->json(['users' => User::with('branches:id,name')->orderBy('name')->get()]);
+    }
+
+    public function createUser(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->is_admin, 403);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'max:128', Password::min(12)->mixedCase()->letters()->numbers()->symbols()],
+            'memberships' => ['required', 'array', 'min:1'],
+            'memberships.*.branch_id' => ['required', 'integer', 'distinct', 'exists:branches,id'],
+            'memberships.*.role' => ['required', 'in:admin,analyst,purchaser,viewer'],
+        ]);
+        $user = User::create(['name' => $data['name'], 'email' => mb_strtolower($data['email']), 'password' => $data['password']]);
+        $memberships = collect($data['memberships'])->mapWithKeys(fn (array $membership): array => [
+            $membership['branch_id'] => ['role' => $membership['role']],
+        ])->all();
+        $user->branches()->sync($memberships);
+
+        return response()->json(['success' => true, 'user' => $user->load('branches:id,name')], 201);
+    }
+
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', 'string', 'max:128', 'confirmed', Password::min(12)->mixedCase()->letters()->numbers()->symbols()],
+        ]);
+        $request->user()->update(['password' => $data['password']]);
+        Auth::logoutOtherDevices($data['current_password']);
+        $request->session()->regenerate();
+        $request->session()->regenerateToken();
+
+        return response()->json(['success' => true]);
+    }
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
     {
@@ -61,7 +156,7 @@ class ApiController extends Controller
         ]);
 
         try {
-            $preview = $this->excel->preview($request->file('file'));
+            $preview = $this->excel->preview($request->file('file'), $this->branches->id());
         } catch (InvalidArgumentException $exception) {
             return response()->json(['error' => $exception->getMessage()], 422);
         }
@@ -81,7 +176,7 @@ class ApiController extends Controller
         ]);
 
         try {
-            $counts = $this->excel->commit($data['token'], $data['file_name']);
+            $counts = $this->excel->commit($data['token'], $data['file_name'], $this->branches->id());
         } catch (InvalidArgumentException $exception) {
             return response()->json(['error' => $exception->getMessage()], 422);
         }
@@ -210,7 +305,7 @@ class ApiController extends Controller
 
     public function aiBriefing(): JsonResponse
     {
-        $critical = WarehouseStock::where('current_quantity', '<', 50)->count();
+        $critical = WarehouseStock::where('branch_id', $this->branches->id())->where('current_quantity', '<', 50)->count();
         $message = "Контур SAFE активен. {$critical} товаров в зоне риска. ";
         $message .= now()->month === 3
             ? 'Отмечен сезонный календарный фактор: проверьте диапазон q10-q90.'
@@ -266,14 +361,14 @@ class ApiController extends Controller
 
     public function dashboardStats(): JsonResponse
     {
-        $products = Product::with('warehouseStock')->get();
+        $products = $this->branchProducts();
         $total = 0.0;
         $critical = 0;
         $categories = [];
 
         foreach ($products as $product) {
-            $quantity = (float) ($product->warehouseStock?->current_quantity ?? 0);
-            $value = $quantity * (float) $product->unit_price;
+            $quantity = (float) ($product->current_quantity ?? 0);
+            $value = $quantity * (float) $product->branch_unit_price;
             $total += $value;
             $critical += $quantity < 50 ? 1 : 0;
             $category = $product->category ?: 'Общее';
@@ -293,25 +388,26 @@ class ApiController extends Controller
 
     public function stock(): JsonResponse
     {
-        return response()->json(Product::with('warehouseStock')->get()->map(fn ($product) => [
+        return response()->json($this->branchProducts()->map(fn ($product) => [
             'id' => (int) $product->id,
             'sku' => $product->sku ?? null,
             'name' => $product->name,
             'category' => $product->category,
-            'current_quantity' => (int) ($product->warehouseStock?->current_quantity ?? 0),
-            'unit_price' => (float) $product->unit_price,
-            'lead_time' => (int) $product->lead_time,
+            'current_quantity' => (int) ($product->current_quantity ?? 0),
+            'unit_price' => (float) $product->branch_unit_price,
+            'lead_time' => (int) $product->branch_lead_time,
         ]));
     }
 
     public function updateStock(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'product_id' => ['required', 'integer', 'exists:products,id'],
+            'product_id' => ['required', 'integer'],
             'quantity' => ['required', 'integer', 'min:0'],
         ]);
+        abort_unless(DB::table('branch_products')->where('branch_id', $this->branches->id())->where('product_id', $data['product_id'])->exists(), 422, 'Товар не принадлежит выбранному филиалу.');
         WarehouseStock::updateOrCreate(
-            ['product_id' => $data['product_id']],
+            ['branch_id' => $this->branches->id(), 'product_id' => $data['product_id']],
             ['current_quantity' => $data['quantity']],
         );
 
@@ -321,11 +417,13 @@ class ApiController extends Controller
     public function simulate(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'product_id' => ['required', 'integer', 'exists:products,id'],
+            'product_id' => ['required', 'integer'],
             'overrides' => ['sometimes', 'array:is_promo,price_change'],
             'overrides.is_promo' => ['sometimes', 'boolean'],
             'overrides.price_change' => ['sometimes', 'numeric', 'between:-0.5,0.5'],
         ]);
+
+        abort_unless(DB::table('branch_products')->where('branch_id', $this->branches->id())->where('product_id', $data['product_id'])->exists(), 422, 'Товар не принадлежит выбранному филиалу.');
 
         return $this->mlResponse($this->ml->simulate($data['product_id'], $data['overrides'] ?? []));
     }
@@ -360,7 +458,7 @@ class ApiController extends Controller
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         abort_unless(isset($mimeTypes[$extension]), 404);
 
-        $reportsDirectory = realpath((string) config('rayventory.reports_path'));
+        $reportsDirectory = realpath($this->branches->scopedPath((string) config('rayventory.reports_path')));
         abort_unless($reportsDirectory !== false && is_dir($reportsDirectory), 404);
 
         $path = realpath($reportsDirectory.DIRECTORY_SEPARATOR.$filename);
@@ -392,6 +490,7 @@ class ApiController extends Controller
         }
         $suppliers = DB::table('product_planning_settings as settings')
             ->leftJoin('suppliers', 'suppliers.id', '=', 'settings.supplier_id')
+            ->where('settings.branch_id', $this->branches->id())
             ->pluck('suppliers.name', 'settings.product_id');
         $plan['actions'] = array_map(function (array $action) use ($suppliers): array {
             $action['supplier'] = $suppliers[(int) $action['product_id']] ?? null;
@@ -400,5 +499,19 @@ class ApiController extends Controller
         }, $plan['actions']);
 
         return $plan;
+    }
+
+    private function branchProducts(): Collection
+    {
+        return Product::query()
+            ->join('branch_products as bp', 'bp.product_id', '=', 'products.id')
+            ->leftJoin('warehouse_stock as ws', function ($join): void {
+                $join->on('ws.product_id', '=', 'products.id')->where('ws.branch_id', $this->branches->id());
+            })
+            ->where('bp.branch_id', $this->branches->id())
+            ->where('bp.active', true)
+            ->select('products.*', 'bp.unit_price as branch_unit_price', 'bp.lead_time as branch_lead_time', DB::raw('COALESCE(SUM(ws.current_quantity), 0) as current_quantity'))
+            ->groupBy('products.id', 'products.sku', 'products.name', 'products.category', 'products.lead_time', 'products.unit_price', 'bp.unit_price', 'bp.lead_time')
+            ->get();
     }
 }

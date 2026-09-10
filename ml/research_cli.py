@@ -34,6 +34,7 @@ def main() -> None:
     prepare_local.add_argument("--output-dir", type=Path, default=Path("data/processed/local-inventory"))
     prepare_local.add_argument("--series", type=int, default=1000)
     prepare_local.add_argument("--seed", type=int, default=42)
+    prepare_local.add_argument("--branch-id", type=int, default=1)
     prepare_excel = subparsers.add_parser("prepare-excel", help="Prepare research data directly from a Rayventory Excel workbook")
     prepare_excel.add_argument("--source", type=Path, required=True)
     prepare_excel.add_argument("--output-dir", type=Path, default=Path("data/processed/excel-inventory"))
@@ -96,7 +97,7 @@ def main() -> None:
     elif args.action == "prepare-uci":
         print(json.dumps(asdict(prepare_uci_online_retail(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "prepare-local":
-        print(json.dumps(asdict(prepare_local_inventory(args.database, args.output_dir, args.series, args.seed)), ensure_ascii=False))
+        print(json.dumps(asdict(prepare_local_inventory(args.database, args.output_dir, args.series, args.seed, args.branch_id)), ensure_ascii=False))
     elif args.action == "prepare-excel":
         print(json.dumps(asdict(prepare_excel_inventory(args.source, args.output_dir, args.series, args.seed)), ensure_ascii=False))
     elif args.action == "analyze":

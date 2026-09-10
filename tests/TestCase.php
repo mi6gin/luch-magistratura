@@ -2,36 +2,31 @@
 
 namespace Tests;
 
-use Illuminate\Database\Schema\Blueprint;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
-use Illuminate\Support\Facades\Schema;
 
 abstract class TestCase extends BaseTestCase
 {
+    use RefreshDatabase;
+
+    protected User $user;
+
+    protected int $branchId = 1;
+
     protected function setUp(): void
     {
         parent::setUp();
-        Schema::create('products', function (Blueprint $table): void {
-            $table->id();
-            $table->string('sku')->nullable();
-            $table->string('name');
-            $table->string('category')->nullable();
-            $table->unsignedInteger('lead_time')->default(1);
-            $table->decimal('unit_price', 14, 2)->default(0);
-        });
-        Schema::create('suppliers', function (Blueprint $table): void {
-            $table->id();
-            $table->string('name');
-        });
-        Schema::create('product_planning_settings', function (Blueprint $table): void {
-            $table->unsignedBigInteger('product_id')->primary();
-            $table->unsignedBigInteger('supplier_id')->nullable();
-        });
+        $this->user = User::create([
+            'name' => 'Test Admin', 'email' => 'admin@example.test',
+            'password' => 'password', 'is_admin' => true,
+        ]);
+        $this->user->branches()->attach($this->branchId, ['role' => 'admin']);
+        $this->actingAs($this->user);
     }
 
-    protected function tearDown(): void
+    protected function branchHeaders(?int $branchId = null): array
     {
-        Schema::dropAllTables();
-        parent::tearDown();
+        return ['X-Branch-ID' => (string) ($branchId ?? $this->branchId)];
     }
 }

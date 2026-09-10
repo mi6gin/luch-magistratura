@@ -9,10 +9,6 @@ class WarehouseStock extends Model
 {
     protected $table = 'warehouse_stock';
 
-    protected $primaryKey = 'product_id';
-
-    public $incrementing = false;
-
     public $timestamps = false;
 
     protected $guarded = [];

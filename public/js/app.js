@@ -1,6 +1,9 @@
 (function () {
     const root = document.documentElement;
     const page = document.body.dataset.page;
+    let activeBranchId = Number(localStorage.getItem('rayventory-branch-id')) || null;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const branchStorageKey = name => `rayventory-branch-${activeBranchId || 'default'}-${name}`;
     const savedTheme = localStorage.getItem('rayventory-theme')
         || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
     root.dataset.theme = savedTheme;
@@ -57,6 +60,8 @@
             headers: {
                 Accept: 'application/json',
                 'Content-Type': 'application/json',
+                ...(activeBranchId ? { 'X-Branch-ID': String(activeBranchId) } : {}),
+                ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
                 ...headers,
             },
         });
@@ -312,7 +317,7 @@
         try {
             const response = await fetch('/api/purchase-plan/export', {
                 method: 'POST',
-                headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Type': 'application/json' },
+                headers: { Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, ...(activeBranchId ? { 'X-Branch-ID': String(activeBranchId) } : {}) },
                 body: JSON.stringify({ budget: purchaseBudget, items }),
             });
             if (!response.ok) {
@@ -474,7 +479,7 @@
         try {
             const response = await fetch('/api/inventory/import/preview', {
                 method: 'POST',
-                headers: { Accept: 'application/json' },
+                headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken, ...(activeBranchId ? { 'X-Branch-ID': String(activeBranchId) } : {}) },
                 body: form,
             });
             const data = await response.json().catch(() => ({}));
@@ -874,7 +879,7 @@
     };
 
     const finishSimulation = (data, payload, suffix = '') => {
-        localStorage.setItem('rayventory-last-forecast', JSON.stringify({
+        localStorage.setItem(branchStorageKey('last-forecast'), JSON.stringify({
             data,
             payload,
             createdAt: new Date().toISOString(),
@@ -915,7 +920,7 @@
     function restoreLastForecast() {
         if (page !== 'simulator') return;
         try {
-            const saved = JSON.parse(localStorage.getItem('rayventory-last-forecast') || 'null');
+            const saved = JSON.parse(localStorage.getItem(branchStorageKey('last-forecast')) || 'null');
             if (!saved?.data?.dates?.length) return;
             applySimulationPayload(saved.payload);
             renderForecast(saved.data);
@@ -930,7 +935,7 @@
             );
             if (warnings.length) document.querySelector('#chart-empty')?.classList.add('hidden');
         } catch (error) {
-            localStorage.removeItem('rayventory-last-forecast');
+            localStorage.removeItem(branchStorageKey('last-forecast'));
         }
     }
 
@@ -967,7 +972,7 @@
         const warnings = normalizeWarnings(data.warnings);
         const links = artifacts.map(artifact => `
             <li>
-                <a class="artifact-link" target="_blank" rel="noopener" href="/download/reports/${encodeURIComponent(artifact.filename)}">
+                <a class="artifact-link" target="_blank" rel="noopener" href="/download/reports/${encodeURIComponent(artifact.filename)}?branch_id=${encodeURIComponent(activeBranchId || '')}">
                     <span class="artifact-format">${escapeHtml(artifact.format.toUpperCase())}</span>
                     <span class="artifact-name">${escapeHtml(artifact.filename)}</span>
                     <em>Скачать ↗</em>
@@ -1022,7 +1027,7 @@
                 presentation_filename: data.presentation_filename ?? null,
                 createdAt: new Date().toISOString(),
             };
-            localStorage.setItem('rayventory-last-report', JSON.stringify(stored));
+            localStorage.setItem(branchStorageKey('last-report'), JSON.stringify(stored));
             const count = renderReportResult(stored);
             if (status) status.textContent = count === 1 ? 'Документ готов' : `${count} файла готовы`;
             if (warnings.length) {
@@ -1040,7 +1045,7 @@
     }
 
     function restoreLastReport() {
-        const lastReport = localStorage.getItem('rayventory-last-report');
+        const lastReport = localStorage.getItem(branchStorageKey('last-report'));
         if (page !== 'reports' || !lastReport) return;
         try {
             const item = JSON.parse(lastReport);
@@ -1049,7 +1054,7 @@
             const status = document.querySelector('#report-status');
             if (status) status.textContent = 'Восстановлено из последней сессии';
         } catch (error) {
-            localStorage.removeItem('rayventory-last-report');
+            localStorage.removeItem(branchStorageKey('last-report'));
         }
     }
 
@@ -1057,10 +1062,10 @@
         if (page === 'dashboard') loadData();
         if (page === 'simulator' && forecastChart) {
             try {
-                const saved = JSON.parse(localStorage.getItem('rayventory-last-forecast') || 'null');
+                const saved = JSON.parse(localStorage.getItem(branchStorageKey('last-forecast')) || 'null');
                 if (saved?.data) renderForecast(saved.data);
             } catch (error) {
-                localStorage.removeItem('rayventory-last-forecast');
+                localStorage.removeItem(branchStorageKey('last-forecast'));
             }
         }
     };
@@ -1157,8 +1162,6 @@
         if (document.visibilityState === 'visible') scheduleRefresh();
     });
 
-    restoreLastReport();
-
     const palette = document.querySelector('#command-palette');
     const commandInput = document.querySelector('#command-search');
     let selectedCommand = 0;
@@ -1219,22 +1222,91 @@
         }
     });
 
-    if (page === 'dashboard' || page === 'inventory') loadData();
-    if (page === 'simulator') {
-        loadData().finally(() => {
-            restoreLastForecast();
-        });
+    async function initializeBranch() {
+        const response = await fetch('/api/branches', { headers: { Accept: 'application/json', ...(activeBranchId ? { 'X-Branch-ID': String(activeBranchId) } : {}) } });
+        if (!response.ok && activeBranchId) {
+            localStorage.removeItem('rayventory-branch-id');
+            activeBranchId = null;
+            return initializeBranch();
+        }
+        const data = await response.json();
+        activeBranchId = Number(data.active_branch_id);
+        localStorage.setItem('rayventory-branch-id', String(activeBranchId));
+        const select = document.querySelector('#branch-select');
+        if (select) {
+            select.innerHTML = data.branches.map(branch => `<option value="${branch.id}">${escapeHtml(branch.name)}</option>`).join('');
+            select.value = String(activeBranchId);
+            select.onchange = () => {
+                localStorage.setItem('rayventory-branch-id', select.value);
+                window.location.reload();
+            };
+        }
     }
-    if (page === 'purchases') loadPurchasePlan();
-    if (page === 'model-health') loadModelHealth();
-    if (page === 'experiments') {
-        loadExperiments();
-        loadModelRegistry().catch(error => toast(error.message, 'error'));
-        loadTrainingReadiness().catch(error => toast(error.message, 'error'));
-        loadTrainingPipeline().catch(error => toast(error.message, 'error'));
-        loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
-        loadTuning().catch(error => toast(error.message, 'error'));
-        loadScenarios().catch(error => toast(error.message, 'error'));
-        loadResearchReport().catch(error => toast(error.message, 'error'));
+
+    async function loadUsers() {
+        const [data, summary] = await Promise.all([api('users'), api('branches-summary')]);
+        const table = document.querySelector('#users-table');
+        if (table) table.innerHTML = data.users.map(user => `<tr><td>${escapeHtml(user.name)}</td><td>${escapeHtml(user.email)}</td><td>${user.branches.map(branch => escapeHtml(branch.name)).join(', ') || '—'}</td></tr>`).join('');
+        const summaryTable = document.querySelector('#branches-summary-table');
+        if (summaryTable) summaryTable.innerHTML = summary.branches.map(branch => `<tr><td>${escapeHtml(branch.name)}</td><td>${branch.products}</td><td>${branch.sales_rows}</td><td>${Number(branch.stock_units).toLocaleString('ru-RU')}</td></tr>`).join('');
     }
+
+    document.querySelector('#user-create-form')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        try {
+            await api('users', { method: 'POST', body: JSON.stringify({
+                name: document.querySelector('#new-user-name').value,
+                email: document.querySelector('#new-user-email').value,
+                password: document.querySelector('#new-user-password').value,
+                memberships: [{ branch_id: activeBranchId, role: document.querySelector('#new-user-role').value }],
+            }) });
+            event.target.reset();
+            await loadUsers();
+            toast('Пользователь создан');
+        } catch (error) { toast(error.message, 'error'); }
+    });
+
+    document.querySelector('#password-change-form')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        try {
+            await api('account/password', { method: 'POST', body: JSON.stringify({
+                current_password: document.querySelector('#current-password').value,
+                password: document.querySelector('#new-password').value,
+                password_confirmation: document.querySelector('#new-password-confirmation').value,
+            }) });
+            event.target.reset();
+            toast('Пароль обновлён');
+        } catch (error) { toast(error.message, 'error'); }
+    });
+
+    document.querySelector('#create-branch')?.addEventListener('click', async () => {
+        const name = window.prompt('Название нового филиала');
+        if (!name?.trim()) return;
+        try {
+            const result = await api('branches', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+            localStorage.setItem('rayventory-branch-id', String(result.branch.id));
+            window.location.reload();
+        } catch (error) {
+            toast(error.message, 'error');
+        }
+    });
+
+    initializeBranch().then(() => {
+        restoreLastReport();
+        if (page === 'dashboard' || page === 'inventory') loadData();
+        if (page === 'simulator') loadData().finally(restoreLastForecast);
+        if (page === 'purchases') loadPurchasePlan();
+        if (page === 'model-health') loadModelHealth();
+        if (page === 'experiments') {
+            loadExperiments();
+            loadModelRegistry().catch(error => toast(error.message, 'error'));
+            loadTrainingReadiness().catch(error => toast(error.message, 'error'));
+            loadTrainingPipeline().catch(error => toast(error.message, 'error'));
+            loadDatasetAnalysis().catch(error => toast(error.message, 'error'));
+            loadTuning().catch(error => toast(error.message, 'error'));
+            loadScenarios().catch(error => toast(error.message, 'error'));
+            loadResearchReport().catch(error => toast(error.message, 'error'));
+        }
+        if (page === 'settings' && document.querySelector('#users-table')) loadUsers().catch(error => toast(error.message, 'error'));
+    }).catch(error => toast(error.message || 'Не удалось выбрать филиал', 'error'));
 })();

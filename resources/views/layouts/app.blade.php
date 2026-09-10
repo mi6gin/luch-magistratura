@@ -23,11 +23,12 @@
             <a href="{{ route('knowledge') }}" class="nav-link {{ ($page ?? '') === 'knowledge' ? 'active' : '' }}"><i>?</i><span>База знаний</span><em>06</em></a>
             <a href="{{ route('experiments') }}" class="nav-link {{ ($page ?? '') === 'experiments' ? 'active' : '' }}"><i>⌬</i><span>Эксперименты</span><em>07</em></a>
             <a href="{{ route('model-health') }}" class="nav-link {{ ($page ?? '') === 'model-health' ? 'active' : '' }}"><i>◎</i><span>Здоровье модели</span><em>08</em></a>
+            <a href="{{ route('settings') }}" class="nav-link {{ ($page ?? '') === 'settings' ? 'active' : '' }}"><i>⚙</i><span>Настройки</span><em>09</em></a>
         </nav>
         <div class="sidebar-bottom"><div class="system-status"><span class="pulse"></span><span>ALL SYSTEMS<br><b>OPERATIONAL</b></span></div><div class="location">KZ / ALMATY<br><span>UTC +05:00</span></div></div>
     </aside>
     <div class="app-main">
-        <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Открыть меню">☰</button><div><span class="crumb">RAY OS <b>/</b> {{ $section ?? 'WORKSPACE' }}</span><h1>{{ $heading ?? 'Центр управления' }}</h1></div><div class="top-actions"><span class="live"><span class="pulse"></span> LIVE DATA</span><button class="command-trigger" id="command-trigger" aria-label="Открыть командную палитру"><span>⌘</span><kbd>K</kbd></button><button class="theme-toggle" id="theme-toggle" aria-label="Переключить тему">☀</button><div class="user-chip"><div class="avatar">RV</div><span>Ray Admin<small>Workspace owner</small></span></div></div></header>
+        <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Открыть меню">☰</button><div><span class="crumb">RAY OS <b>/</b> {{ $section ?? 'WORKSPACE' }}</span><h1>{{ $heading ?? 'Центр управления' }}</h1></div><div class="top-actions"><label class="branch-picker"><span>Филиал</span><select id="branch-select" aria-label="Активный филиал"></select></label>@if(auth()->user()?->is_admin)<button class="command-trigger" id="create-branch" aria-label="Добавить филиал">+</button>@endif<span class="live"><span class="pulse"></span> LIVE DATA</span><button class="command-trigger" id="command-trigger" aria-label="Открыть командную палитру"><span>⌘</span><kbd>K</kbd></button><button class="theme-toggle" id="theme-toggle" aria-label="Переключить тему">☀</button><form method="post" action="{{ route('logout') }}">@csrf<button class="user-chip" type="submit"><div class="avatar">{{ mb_strtoupper(mb_substr(auth()->user()->name, 0, 2)) }}</div><span>{{ auth()->user()->name }}<small>Выйти</small></span></button></form></div></header>
         <main class="page-content page-enter">@yield('content')</main>
     </div>
 </div>

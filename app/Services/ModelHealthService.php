@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\File;
 
 class ModelHealthService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function record(array $plan, string $trigger, ?string $source = null): array
     {
         $evaluation = $plan['evaluation'] ?? [];
@@ -67,6 +69,6 @@ class ModelHealthService
 
     private function directory(): string
     {
-        return (string) config('rayventory.model_health_path', storage_path('app/model-health'));
+        return $this->branches->scopedPath((string) config('rayventory.model_health_path', storage_path('app/model-health')));
     }
 }

@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 
 class LocalTrainingService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     private const MINIMUM_DAYS = 175;
 
     private const RECOMMENDED_DAYS = 365;
@@ -14,6 +16,7 @@ class LocalTrainingService
     public function readiness(): array
     {
         $series = DB::table('sales_history')
+            ->where('branch_id', $this->branches->id())
             ->selectRaw('product_id, MIN(sale_date) AS date_start, MAX(sale_date) AS date_end, COUNT(DISTINCT sale_date) AS observations')
             ->groupBy('product_id')
             ->get()

@@ -224,6 +224,23 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertIn("weekly_lag_correlation", analysis["patterns"])
             self.assertIn(analysis["series_preview"][0]["demand_type"], {"smooth", "intermittent", "erratic", "lumpy"})
 
+    def test_prepare_local_inventory_filters_selected_branch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "branches.db"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, name TEXT, category TEXT, unit_price REAL)")
+                connection.execute("CREATE TABLE sales_history (branch_id INTEGER, product_id INTEGER, sale_date TEXT, quantity_sold INTEGER, in_stock INTEGER, is_holiday INTEGER, is_promo INTEGER)")
+                connection.execute("INSERT INTO products VALUES (1, 'SHARED', 'Общий товар', 'Тест', 100)")
+                rows = []
+                for branch_id, quantity in ((1, 1), (2, 9)):
+                    rows.extend((branch_id, 1, date.date().isoformat(), quantity, 1, 0, 0) for date in pd.date_range("2025-01-01", periods=180))
+                connection.executemany("INSERT INTO sales_history VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+            prepare_local_inventory(database, root / "branch-2", branch_id=2)
+            prepared = pd.read_csv(root / "branch-2/local_inventory.csv.gz")
+            self.assertEqual(set(prepared["sales"]), {9.0})
+            self.assertEqual(len(prepared), 180)
+
     def test_prepare_excel_inventory_uses_rayventory_workbook(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -125,11 +125,13 @@ def _recover_oos_demand(sales: pd.DataFrame) -> pd.DataFrame:
 
 def load_inventory_data(
     db_path: str | os.PathLike[str] | None = None,
+    branch_id: int | None = None,
 ) -> dict[str, Any]:
     """Load and validate products, sales, stock, and transit from SQLite."""
     path = _resolve_db_path(db_path)
     warnings: list[str] = []
 
+    branch_id = branch_id or int(os.getenv("ML_BRANCH_ID", "1"))
     with sqlite3.connect(str(path), timeout=30) as connection:
         table_names = {
             row[0]
@@ -148,6 +150,20 @@ def load_inventory_data(
         else:
             transit = pd.DataFrame(columns=["product_id", "in_transit_quantity"])
             warnings.append("Таблица товаров в пути отсутствует; объём в пути принят равным нулю.")
+        if "branch_products" in table_names:
+            branch_products = pd.read_sql_query(
+                "SELECT product_id, lead_time, unit_price FROM branch_products WHERE branch_id = ? AND active = 1",
+                connection, params=(branch_id,),
+            )
+            products = products.drop(columns=["lead_time", "unit_price"], errors="ignore").merge(
+                branch_products, left_on="id", right_on="product_id", how="inner"
+            ).drop(columns=["product_id"], errors="ignore")
+        if "branch_id" in sales.columns:
+            sales = sales.loc[sales["branch_id"] == branch_id].drop(columns=["branch_id"])
+        if "branch_id" in stock.columns:
+            stock = stock.loc[stock["branch_id"] == branch_id].drop(columns=["branch_id"])
+        if "branch_id" in transit.columns:
+            transit = transit.loc[transit["branch_id"] == branch_id].drop(columns=["branch_id"])
 
     product_required = {"id", "name", "category", "lead_time", "unit_price"}
     sales_required = {"product_id", "sale_date", "quantity_sold"}

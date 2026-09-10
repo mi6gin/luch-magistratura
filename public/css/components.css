@@ -37,6 +37,8 @@
 .user-chip { display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 11px; font-weight: 650; }
 .user-chip > span { display: flex; flex-direction: column; line-height: 1.2; }
 .user-chip small { margin-top: 4px; color: var(--muted); font-size: 9px; font-weight: 450; }
+.branch-picker { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.branch-picker select { max-width: 190px; border: 1px solid var(--grid); border-radius: 8px; padding: 6px 8px; color: var(--text); background: var(--panel); font: inherit; text-transform: none; }
 .avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 11px; background: linear-gradient(135deg, #ff7440, #d65a2d); color: #fff; font-size: 10px; font-weight: 800; }
 .drawer-backdrop, .command-overlay { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; background: rgba(2, 7, 15, .62); backdrop-filter: blur(10px); opacity: 0; visibility: hidden; }
 .drawer-backdrop.open, .command-overlay.open { opacity: 1; visibility: visible; }

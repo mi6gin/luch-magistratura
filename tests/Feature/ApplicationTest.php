@@ -2,24 +2,131 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use App\Services\InventoryExcelService;
 use App\Services\MlBridge;
 use App\Services\ModelHealthService;
 use App\Services\ModelRegistryService;
 use App\Services\ResearchExperimentService;
 use App\Services\ResearchReportService;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class ApplicationTest extends TestCase
 {
+    public function test_local_login_and_api_authentication_work(): void
+    {
+        auth()->logout();
+        $this->getJson('/api/stock')->assertUnauthorized();
+        $this->post('/login', ['email' => 'admin@example.test', 'password' => 'password'])
+            ->assertRedirect('/');
+        $this->assertAuthenticatedAs($this->user);
+    }
+
+    public function test_login_is_rate_limited_and_does_not_create_persistent_login(): void
+    {
+        auth()->logout();
+        RateLimiter::clear(hash('sha256', 'admin@example.test|127.0.0.1'));
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->from('/login')->post('/login', ['email' => 'admin@example.test', 'password' => 'wrong-password'])
+                ->assertRedirect('/login');
+        }
+        $this->from('/login')->post('/login', ['email' => 'admin@example.test', 'password' => 'password'])
+            ->assertRedirect('/login')
+            ->assertSessionHasErrors('email');
+        $this->assertGuest();
+    }
+
+    public function test_security_headers_and_strong_password_policy_are_enforced(): void
+    {
+        auth()->logout();
+        $this->get('/login')
+            ->assertOk()
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('X-Content-Type-Options', 'nosniff')
+            ->assertHeader('Content-Security-Policy');
+
+        $this->actingAs($this->user)->postJson('/api/users', [
+            'name' => 'Weak Password User',
+            'email' => 'weak@example.test',
+            'password' => 'password1234',
+            'memberships' => [['branch_id' => 1, 'role' => 'viewer']],
+        ])->assertUnprocessable()->assertJsonValidationErrors('password');
+
+        $this->postJson('/api/users', [
+            'name' => 'Strong Password User',
+            'email' => 'STRONG@example.test',
+            'password' => 'Reliable#Pass123',
+            'memberships' => [['branch_id' => 1, 'role' => 'viewer']],
+        ])->assertCreated();
+        $created = User::where('email', 'strong@example.test')->firstOrFail();
+        $this->assertTrue(Hash::check('Reliable#Pass123', $created->password));
+        $this->assertStringStartsWith('$argon2id$', $created->password);
+    }
+
+    public function test_successful_mutation_is_audited(): void
+    {
+        $this->postJson('/api/branches', ['name' => 'Макеновский', 'code' => 'makenovsky'])->assertCreated();
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $this->user->id, 'branch_id' => 1,
+            'method' => 'POST', 'path' => 'api/branches', 'status' => 201,
+        ]);
+    }
+
+    public function test_guest_is_redirected_to_login_and_viewer_cannot_mutate(): void
+    {
+        auth()->logout();
+        $this->get('/')->assertRedirect('/login');
+        $viewer = User::create(['name' => 'Viewer', 'email' => 'viewer@example.test', 'password' => 'password']);
+        $viewer->branches()->attach(1, ['role' => 'viewer']);
+        $this->actingAs($viewer)->postJson('/api/branches', ['name' => 'Запрещённый'])->assertForbidden();
+    }
+
+    public function test_branch_access_is_enforced_and_summary_is_isolated(): void
+    {
+        $branchId = \DB::table('branches')->insertGetId([
+            'organization_id' => 1, 'name' => 'Второй', 'code' => 'second', 'active' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $limited = User::create(['name' => 'Limited', 'email' => 'limited@example.test', 'password' => 'password']);
+        $limited->branches()->attach(1, ['role' => 'analyst']);
+        $this->actingAs($limited)->withHeaders($this->branchHeaders($branchId))->getJson('/api/stock')->assertForbidden();
+        $this->actingAs($this->user)->withHeaders($this->branchHeaders($branchId))->getJson('/api/stock')->assertOk()->assertExactJson([]);
+    }
+
+    public function test_excel_import_replaces_only_selected_branch(): void
+    {
+        $branchId = \DB::table('branches')->insertGetId([
+            'organization_id' => 1, 'name' => 'Приханский', 'code' => 'prikhansky', 'active' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $path = tempnam(sys_get_temp_dir(), 'rayventory-branches-');
+        $service = app(InventoryExcelService::class);
+        $service->createTemplate($path, true);
+        $upload = fn () => new UploadedFile($path, 'branch.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+        try {
+            $first = $service->preview($upload(), 1);
+            $service->commit($first['token'], 'main.xlsx', 1);
+            $second = $service->preview($upload(), $branchId);
+            $service->commit($second['token'], 'second.xlsx', $branchId);
+            $this->assertSame(2920, \DB::table('sales_history')->where('branch_id', 1)->count());
+            $this->assertSame(2920, \DB::table('sales_history')->where('branch_id', $branchId)->count());
+            $this->assertSame(8, \DB::table('products')->count());
+            $this->assertSame(8, \DB::table('branch_products')->where('branch_id', $branchId)->count());
+        } finally {
+            @unlink($path);
+            File::deleteDirectory(storage_path('app/branches/1'));
+            File::deleteDirectory(storage_path('app/branches/'.$branchId));
+        }
+    }
+
     public function test_all_workspace_pages_are_available(): void
     {
-        foreach (['/', '/inventory', '/simulator', '/purchases', '/reports', '/knowledge', '/model-health', '/experiments'] as $path) {
+        foreach (['/', '/inventory', '/simulator', '/purchases', '/reports', '/knowledge', '/model-health', '/experiments', '/settings'] as $path) {
             $this->get($path)->assertOk();
         }
     }
@@ -47,8 +154,8 @@ class ApplicationTest extends TestCase
     {
         $directory = sys_get_temp_dir().'/rayventory-experiments-'.bin2hex(random_bytes(5));
         config(['rayventory.experiments_path' => $directory]);
-        File::ensureDirectoryExists($directory.'/EXP-20260902T120000Z-ABC123');
-        File::put($directory.'/EXP-20260902T120000Z-ABC123/result.json', json_encode([
+        File::ensureDirectoryExists($directory.'/branches/1/EXP-20260902T120000Z-ABC123');
+        File::put($directory.'/branches/1/EXP-20260902T120000Z-ABC123/result.json', json_encode([
             'experiment_id' => 'EXP-20260902T120000Z-ABC123',
             'created_at' => '2026-09-02T12:00:00+00:00',
             'dataset' => ['dataset' => 'UCI Online Retail II', 'series_count' => 300],
@@ -72,9 +179,9 @@ class ApplicationTest extends TestCase
     {
         $directory = sys_get_temp_dir().'/rayventory-report-'.bin2hex(random_bytes(5));
         config(['rayventory.research_report_path' => $directory]);
-        File::ensureDirectoryExists($directory);
-        File::put($directory.'/summary.json', json_encode(['best_neural' => 'gru'], JSON_THROW_ON_ERROR));
-        File::put($directory.'/forecast-gru.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+        File::ensureDirectoryExists($directory.'/branches/1');
+        File::put($directory.'/branches/1/summary.json', json_encode(['best_neural' => 'gru'], JSON_THROW_ON_ERROR));
+        File::put($directory.'/branches/1/forecast-gru.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
 
         try {
             $this->assertSame('gru', app(ResearchReportService::class)->latest()['best_neural']);
@@ -94,8 +201,8 @@ class ApplicationTest extends TestCase
             'rayventory.experiments_path' => $experiments,
             'rayventory.model_registry_path' => $root.'/registry.json',
         ]);
-        File::ensureDirectoryExists($experiments.'/EXP-20260902T120000Z-ABC123');
-        File::put($experiments.'/EXP-20260902T120000Z-ABC123/result.json', json_encode([
+        File::ensureDirectoryExists($experiments.'/branches/1/EXP-20260902T120000Z-ABC123');
+        File::put($experiments.'/branches/1/EXP-20260902T120000Z-ABC123/result.json', json_encode([
             'experiment_id' => 'EXP-20260902T120000Z-ABC123',
             'created_at' => '2026-09-02T12:00:00+00:00',
             'dataset' => ['dataset' => 'UCI Online Retail II'],
@@ -127,8 +234,8 @@ class ApplicationTest extends TestCase
             'rayventory.model_registry_path' => $root.'/registry.json',
             'rayventory.models_path' => $root.'/models',
         ]);
-        File::ensureDirectoryExists($experiments.'/EXP-20260902T130000Z-ABC123');
-        File::put($experiments.'/EXP-20260902T130000Z-ABC123/result.json', json_encode([
+        File::ensureDirectoryExists($experiments.'/branches/1/EXP-20260902T130000Z-ABC123');
+        File::put($experiments.'/branches/1/EXP-20260902T130000Z-ABC123/result.json', json_encode([
             'experiment_id' => 'EXP-20260902T130000Z-ABC123',
             'created_at' => '2026-09-02T13:00:00+00:00',
             'dataset' => ['dataset' => 'Local Rayventory inventory'],
@@ -160,13 +267,9 @@ class ApplicationTest extends TestCase
     {
         $directory = sys_get_temp_dir().'/rayventory-training-jobs-'.bin2hex(random_bytes(5));
         config(['rayventory.training_jobs_path' => $directory]);
-        Schema::create('sales_history', function (Blueprint $table): void {
-            $table->unsignedBigInteger('product_id');
-            $table->date('sale_date');
-        });
         \DB::table('sales_history')->insert([
-            ['product_id' => 1, 'sale_date' => '2026-08-01'],
-            ['product_id' => 1, 'sale_date' => '2026-08-30'],
+            ['branch_id' => 1, 'product_id' => 1, 'sale_date' => '2026-08-01', 'quantity_sold' => 1],
+            ['branch_id' => 1, 'product_id' => 1, 'sale_date' => '2026-08-30', 'quantity_sold' => 1],
         ]);
 
         $this->getJson('/api/training-readiness')->assertOk()
@@ -185,7 +288,9 @@ class ApplicationTest extends TestCase
     {
         $path = sys_get_temp_dir().'/rayventory-analysis-'.bin2hex(random_bytes(5)).'.json';
         config(['rayventory.dataset_analysis_path' => $path]);
-        File::put($path, json_encode([
+        File::ensureDirectoryExists(dirname($path).'/branches/1');
+        $scopedPath = dirname($path).'/branches/1/'.basename($path);
+        File::put($scopedPath, json_encode([
             'dataset' => 'Local Rayventory inventory',
             'volume' => ['series' => 3, 'rows' => 1095],
             'period' => ['days' => 365],
@@ -196,7 +301,7 @@ class ApplicationTest extends TestCase
                 ->assertJsonPath('analysis.volume.rows', 1095)
                 ->assertJsonPath('analysis.period.days', 365);
         } finally {
-            File::delete($path);
+            File::delete($scopedPath);
         }
     }
 
@@ -204,8 +309,8 @@ class ApplicationTest extends TestCase
     {
         $directory = sys_get_temp_dir().'/rayventory-tuning-'.bin2hex(random_bytes(5));
         config(['rayventory.tuning_path' => $directory]);
-        File::ensureDirectoryExists($directory.'/TUNE-TEST');
-        File::put($directory.'/TUNE-TEST/result.json', json_encode([
+        File::ensureDirectoryExists($directory.'/branches/1/TUNE-TEST');
+        File::put($directory.'/branches/1/TUNE-TEST/result.json', json_encode([
             'tuning_id' => 'TUNE-TEST',
             'trials' => [['model' => 'gru', 'metrics' => ['wape_pct' => 20.0]]],
             'best_by_model' => ['gru' => ['model' => 'gru']],
@@ -223,8 +328,8 @@ class ApplicationTest extends TestCase
     {
         $directory = sys_get_temp_dir().'/rayventory-scenarios-'.bin2hex(random_bytes(5));
         config(['rayventory.scenarios_path' => $directory]);
-        File::ensureDirectoryExists($directory.'/SCENARIO-TEST');
-        File::put($directory.'/SCENARIO-TEST/result.json', json_encode([
+        File::ensureDirectoryExists($directory.'/branches/1/SCENARIO-TEST');
+        File::put($directory.'/branches/1/SCENARIO-TEST/result.json', json_encode([
             'benchmark_id' => 'SCENARIO-TEST',
             'scenarios' => [['scenario' => 'trend', 'winner' => 'gru']],
             'models' => ['gru' => ['mean_wape_pct' => 12.0]],
@@ -258,7 +363,7 @@ class ApplicationTest extends TestCase
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 null,
                 true,
-            ));
+            ), 1);
 
             $this->assertSame(8, $preview['counts']['products']);
             $this->assertSame(2920, $preview['counts']['sales']);
@@ -297,7 +402,7 @@ class ApplicationTest extends TestCase
             $book->disconnectWorksheets();
         } finally {
             if (isset($preview['token'])) {
-                File::delete(storage_path('app/import-previews/'.$preview['token'].'.json'));
+                File::delete(storage_path('app/branches/1/import-previews/'.$preview['token'].'.json'));
             }
             @unlink($path);
         }
@@ -308,6 +413,7 @@ class ApplicationTest extends TestCase
         $productId = \DB::table('products')->insertGetId([
             'sku' => 'SKU-1', 'name' => 'Товар', 'category' => 'Тест', 'lead_time' => 2, 'unit_price' => 100,
         ]);
+        \DB::table('branch_products')->insert(['branch_id' => 1, 'product_id' => $productId, 'lead_time' => 2, 'unit_price' => 100, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
         $ml = $this->createMock(MlBridge::class);
         $ml->expects($this->once())->method('simulate')->with($productId, [
             'is_promo' => true, 'price_change' => 0.1,

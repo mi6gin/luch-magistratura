@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\File;
 
 class ResearchExperimentService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function list(int $limit = 20): array
     {
         return collect($this->resultFiles())->take($limit)->map(function ($file): array {
@@ -51,6 +53,6 @@ class ResearchExperimentService
 
     private function directory(): string
     {
-        return (string) config('rayventory.experiments_path', storage_path('app/experiments'));
+        return $this->branches->scopedPath((string) config('rayventory.experiments_path', storage_path('app/experiments')));
     }
 }

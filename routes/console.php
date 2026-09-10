@@ -8,12 +8,6 @@ Artisan::command('rayventory:setup {--force : Replace the existing working datab
     $source = database_path('seed/inventory_forecast.db');
     $target = (string) config('database.connections.sqlite.database');
 
-    if (! File::isFile($source)) {
-        $this->error("Seed database not found: {$source}");
-
-        return 1;
-    }
-
     if ($target === ':memory:') {
         $this->error('A persistent SQLite path is required for Rayventory.');
 
@@ -23,26 +17,31 @@ Artisan::command('rayventory:setup {--force : Replace the existing working datab
     if (File::isFile($target) && ! $this->option('force')) {
         $this->info("Working database already exists: {$target}");
         $this->call('migrate', ['--force' => true]);
+        $this->call('db:seed', ['--force' => true]);
 
         return 0;
     }
 
     File::ensureDirectoryExists(dirname($target));
-    if (! File::copy($source, $target)) {
-        $this->error("Unable to create working database: {$target}");
+    if (File::isFile($source)) {
+        if (! File::copy($source, $target)) {
+            $this->error("Unable to create working database: {$target}");
 
-        return 1;
+            return 1;
+        }
+    } else {
+        File::put($target, '');
     }
 
     $this->info("Working database is ready: {$target}");
     $this->call('migrate', ['--force' => true]);
+    $this->call('db:seed', ['--force' => true]);
 
     return 0;
-})->purpose('Create the working SQLite database from the bundled demo seed');
+})->purpose('Create and seed the working SQLite database');
 
 Artisan::command('rayventory:cleanup', function (): int {
-    $removeOlderThan = function (string $relativePath, int $cutoff): int {
-        $directory = storage_path('app/'.$relativePath);
+    $removeDirectoryOlderThan = function (string $directory, int $cutoff): int {
         if (! File::isDirectory($directory)) {
             return 0;
         }
@@ -55,6 +54,7 @@ Artisan::command('rayventory:cleanup', function (): int {
 
         return $removed;
     };
+    $removeOlderThan = fn (string $relativePath, int $cutoff): int => $removeDirectoryOlderThan(storage_path('app/'.$relativePath), $cutoff);
 
     $removed = $removeOlderThan('import-previews', now()->subDay()->getTimestamp());
     $removed += $removeOlderThan('ml-jobs', now()->subDays(7)->getTimestamp());
@@ -63,6 +63,16 @@ Artisan::command('rayventory:cleanup', function (): int {
     $removed += $removeOlderThan('model-health', now()->subYear()->getTimestamp());
     $removed += $removeOlderThan('training-jobs', now()->subDays(30)->getTimestamp());
 
+    foreach (File::glob(storage_path('app/branches/*')) ?: [] as $branchDirectory) {
+        $removed += $removeDirectoryOlderThan($branchDirectory.'/import-previews', now()->subDay()->getTimestamp());
+        $removed += $removeDirectoryOlderThan($branchDirectory.'/import-history', now()->subYear()->getTimestamp());
+    }
+    foreach (['reports' => 30, 'training-jobs' => 30, 'model-health' => 365] as $root => $days) {
+        foreach (File::glob(storage_path('app/'.$root.'/branches/*')) ?: [] as $branchDirectory) {
+            $removed += $removeDirectoryOlderThan($branchDirectory, now()->subDays($days)->getTimestamp());
+        }
+    }
+
     $backupDirectory = storage_path('app/import-backups');
     if (File::isDirectory($backupDirectory)) {
         $backups = collect(File::files($backupDirectory))
@@ -70,6 +80,11 @@ Artisan::command('rayventory:cleanup', function (): int {
             ->slice(10);
         foreach ($backups as $backup) {
             $removed += File::delete($backup->getPathname()) ? 1 : 0;
+        }
+    }
+    foreach (File::glob(storage_path('app/branches/*/import-backups')) ?: [] as $directory) {
+        foreach (collect(File::files($directory))->sortByDesc(fn ($file) => $file->getMTime())->slice(10) as $file) {
+            $removed += File::delete($file->getPathname()) ? 1 : 0;
         }
     }
 

@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
@@ -55,7 +57,7 @@ class InventoryExcelService
             ['02', 'Продажи', 'Добавьте ежедневную историю', 'Минимум 90 дней; лучше 12 месяцев', 'Пропущенные даты ухудшают прогноз'],
             ['03', 'Остатки', 'Укажите состояние на сегодня', 'Ровно одна строка на товар', 'Количество не может быть отрицательным'],
             ['04', 'Поставки', 'Добавьте ожидаемые поступления', 'Лист необязательный', 'Укажите дату, статус и поставщика'],
-            ['05', 'Импорт', 'Удалите тестовые строки и внесите свои', 'Не меняйте названия листов и колонок', 'Загрузите .xlsx в разделе «Склад»'],
+            ['05', 'Импорт', 'Выберите филиал и внесите его полный набор данных', 'Не меняйте названия листов и колонок', 'Файл заменит данные только активного филиала'],
         ], '__EMPTY__', 'A10');
         $guide->mergeCells('A17:E17');
         $guide->setCellValue('A17', 'ЧТО ОЗНАЧАЮТ 0 И 1 НА ЛИСТЕ «ПРОДАЖИ»');
@@ -67,8 +69,8 @@ class InventoryExcelService
         ], '__EMPTY__', 'A18');
         $guide->mergeCells('A23:E23');
         $guide->setCellValue('A23', $withExample
-            ? 'Это исследовательский пример: 8 товаров × 365 дней = 2 920 строк. Каждый SKU демонстрирует отдельный сценарий из ИУП.'
-            : 'Это пустой рабочий шаблон. Не меняйте названия листов и колонок; заполните его своими данными и загрузите на сайте.');
+            ? 'Это исследовательский пример: 8 товаров × 365 дней = 2 920 строк. Импорт применяется только к выбранному в интерфейсе филиалу.'
+            : 'Это пустой шаблон полного набора данных одного филиала. Выберите нужный филиал перед загрузкой; сведения других филиалов не изменятся.');
         if ($withExample) {
             $guide->mergeCells('A25:E25')->setCellValue('A25', 'СЦЕНАРИИ В ИССЛЕДОВАТЕЛЬСКОМ ПРИМЕРЕ');
             $guide->fromArray([
@@ -371,7 +373,7 @@ class InventoryExcelService
         $book->disconnectWorksheets();
     }
 
-    public function preview(UploadedFile $file): array
+    public function preview(UploadedFile $file, ?int $branchId = null): array
     {
         try {
             $reader = IOFactory::createReaderForFile($file->getRealPath());
@@ -499,18 +501,19 @@ class InventoryExcelService
             $warnings[] = 'История короче 12 месяцев: сезонность может быть определена неточно.';
         }
 
-        $payload = compact('productRows', 'salesRows', 'stockRows', 'supplyRows');
+        $branchId ??= 1;
+        $payload = compact('branchId', 'productRows', 'salesRows', 'stockRows', 'supplyRows');
         $token = bin2hex(random_bytes(16));
-        $directory = storage_path('app/import-previews');
+        $directory = storage_path('app/branches/'.$branchId.'/import-previews');
         File::ensureDirectoryExists($directory);
         File::put($directory.DIRECTORY_SEPARATOR.$token.'.json', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
 
-        $currentCounts = collect([
-            'products' => 'products',
-            'sales' => 'sales_history',
-            'stocks' => 'warehouse_stock',
-            'supplies' => 'warehouse_in_transit',
-        ])->map(fn (string $table): int => Schema::hasTable($table) ? DB::table($table)->count() : 0)->all();
+        $currentCounts = [
+            'products' => Schema::hasTable('branch_products') ? DB::table('branch_products')->where('branch_id', $branchId)->count() : 0,
+            'sales' => DB::table('sales_history')->where('branch_id', $branchId)->count(),
+            'stocks' => DB::table('warehouse_stock')->where('branch_id', $branchId)->count(),
+            'supplies' => DB::table('warehouse_in_transit')->where('branch_id', $branchId)->count(),
+        ];
         $nextCounts = [
             'products' => count($productRows),
             'sales' => count($salesRows),
@@ -520,6 +523,7 @@ class InventoryExcelService
 
         return [
             'token' => $token,
+            'branch_id' => $branchId,
             'counts' => $nextCounts,
             'impact' => collect($nextCounts)->map(fn (int $next, string $key): array => [
                 'current' => $currentCounts[$key],
@@ -534,32 +538,83 @@ class InventoryExcelService
         ];
     }
 
-    public function commit(string $token, string $sourceName): array
+    public function commit(string $token, string $sourceName, ?int $branchId = null): array
+    {
+        $branchId ??= 1;
+        try {
+            return Cache::lock('inventory-import:branch:'.$branchId, 120)->block(
+                1,
+                fn (): array => $this->commitLocked($token, $sourceName, $branchId),
+            );
+        } catch (LockTimeoutException) {
+            throw new InvalidArgumentException('Для этого филиала уже выполняется импорт. Дождитесь его завершения.');
+        }
+    }
+
+    private function commitLocked(string $token, string $sourceName, int $branchId): array
     {
         if (preg_match('/^[a-f0-9]{32}$/', $token) !== 1) {
             throw new InvalidArgumentException('Некорректный идентификатор предварительной проверки.');
         }
-        $path = storage_path('app/import-previews/'.$token.'.json');
+        $path = storage_path('app/branches/'.$branchId.'/import-previews/'.$token.'.json');
         if (! File::isFile($path)) {
             throw new InvalidArgumentException('Предварительная проверка устарела. Загрузите файл ещё раз.');
         }
         $payload = json_decode((string) File::get($path), true, 512, JSON_THROW_ON_ERROR);
+        if ((int) ($payload['branchId'] ?? 0) !== $branchId) {
+            throw new InvalidArgumentException('Предварительная проверка принадлежит другому филиалу.');
+        }
         $this->ensureImportSchema();
 
         $database = (string) config('database.connections.sqlite.database');
-        $backupDirectory = storage_path('app/import-backups');
+        $backupDirectory = storage_path('app/branches/'.$branchId.'/import-backups');
         File::ensureDirectoryExists($backupDirectory);
         $backup = $backupDirectory.'/inventory-before-'.now()->format('Ymd-His').'.sqlite';
         if (File::isFile($database)) {
             File::copy($database, $backup);
         }
 
-        DB::transaction(function () use ($payload): void {
-            DB::table('sales_history')->delete();
-            DB::table('warehouse_stock')->delete();
-            DB::table('warehouse_in_transit')->delete();
-            DB::table('products')->delete();
-            DB::table('products')->insert($payload['productRows']);
+        DB::transaction(function () use ($payload, $branchId): void {
+            DB::table('sales_history')->where('branch_id', $branchId)->delete();
+            DB::table('warehouse_stock')->where('branch_id', $branchId)->delete();
+            DB::table('warehouse_in_transit')->where('branch_id', $branchId)->delete();
+            DB::table('branch_products')->where('branch_id', $branchId)->delete();
+
+            $productMap = [];
+            foreach ($payload['productRows'] as $product) {
+                $temporaryId = (int) $product['id'];
+                $productId = DB::table('products')->where('sku', $product['sku'])->value('id');
+                $catalog = ['sku' => $product['sku'], 'name' => $product['name'], 'category' => $product['category']];
+                if ($productId === null) {
+                    $productId = DB::table('products')->insertGetId($catalog + [
+                        'lead_time' => $product['lead_time'], 'unit_price' => $product['unit_price'],
+                    ]);
+                } else {
+                    DB::table('products')->where('id', $productId)->update($catalog);
+                }
+                $productMap[$temporaryId] = (int) $productId;
+                DB::table('branch_products')->insert([
+                    'branch_id' => $branchId, 'product_id' => $productId,
+                    'lead_time' => $product['lead_time'], 'unit_price' => $product['unit_price'],
+                    'active' => true, 'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+            $remap = static function (array $rows) use ($productMap, $branchId): array {
+                return array_map(function (array $row) use ($productMap, $branchId): array {
+                    $row['product_id'] = $productMap[(int) $row['product_id']];
+                    $row['branch_id'] = $branchId;
+
+                    return $row;
+                }, $rows);
+            };
+            $payload['salesRows'] = $remap($payload['salesRows']);
+            $payload['stockRows'] = $remap($payload['stockRows']);
+            $payload['supplyRows'] = $remap($payload['supplyRows']);
+            $payload['productRows'] = array_map(function (array $product) use ($productMap): array {
+                $product['id'] = $productMap[(int) $product['id']];
+
+                return $product;
+            }, $payload['productRows']);
             foreach (array_chunk($payload['salesRows'], 500) as $chunk) {
                 DB::table('sales_history')->insert($chunk);
             }
@@ -567,7 +622,7 @@ class InventoryExcelService
             if ($payload['supplyRows'] !== []) {
                 DB::table('warehouse_in_transit')->insert($payload['supplyRows']);
             }
-            $this->syncPlanningTables($payload);
+            $this->syncPlanningTables($payload, $branchId);
         });
         File::delete($path);
 
@@ -577,7 +632,7 @@ class InventoryExcelService
             'stocks' => count($payload['stockRows']),
             'supplies' => count($payload['supplyRows']),
         ];
-        $historyDirectory = storage_path('app/import-history');
+        $historyDirectory = storage_path('app/branches/'.$branchId.'/import-history');
         File::ensureDirectoryExists($historyDirectory);
         File::put($historyDirectory.'/'.now()->format('Ymd-His').'-'.$token.'.json', json_encode([
             'imported_at' => now()->toIso8601String(),
@@ -656,24 +711,26 @@ class InventoryExcelService
         }
     }
 
-    private function syncPlanningTables(array $payload): void
+    private function syncPlanningTables(array $payload, int $branchId): void
     {
         if (! Schema::hasTable('warehouses')) {
             return;
         }
 
-        DB::table('purchase_order_lines')->delete();
-        DB::table('purchase_orders')->delete();
-        DB::table('product_planning_settings')->delete();
-        DB::table('inventory_snapshots')->delete();
-        DB::table('suppliers')->delete();
-        DB::table('warehouses')->delete();
+        $orderIdsToDelete = DB::table('purchase_orders')->where('branch_id', $branchId)->pluck('id');
+        DB::table('purchase_order_lines')->whereIn('purchase_order_id', $orderIdsToDelete)->delete();
+        DB::table('purchase_orders')->where('branch_id', $branchId)->delete();
+        DB::table('product_planning_settings')->where('branch_id', $branchId)->delete();
+        DB::table('inventory_snapshots')->where('branch_id', $branchId)->delete();
+        DB::table('suppliers')->where('branch_id', $branchId)->delete();
+        DB::table('warehouses')->where('branch_id', $branchId)->delete();
 
         $warehouseIds = [];
         foreach (array_values(array_unique(array_column($payload['stockRows'], 'warehouse'))) as $warehouse) {
             $warehouseIds[$warehouse] = DB::table('warehouses')->insertGetId([
-                'code' => mb_strtoupper(substr(hash('sha256', $warehouse), 0, 10)),
+                'code' => mb_strtoupper(substr(hash('sha256', $branchId.'|'.$warehouse), 0, 10)),
                 'name' => $warehouse,
+                'branch_id' => $branchId,
                 'active' => true,
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -682,6 +739,7 @@ class InventoryExcelService
         foreach ($payload['stockRows'] as $row) {
             DB::table('inventory_snapshots')->insert([
                 'product_id' => $row['product_id'],
+                'branch_id' => $branchId,
                 'warehouse_id' => $warehouseIds[$row['warehouse']],
                 'snapshot_date' => $row['as_of_date'],
                 'available_quantity' => $row['current_quantity'] + $row['reserved_quantity'],
@@ -695,6 +753,7 @@ class InventoryExcelService
         foreach (array_values(array_unique(array_column($payload['supplyRows'], 'supplier'))) as $supplier) {
             $supplierIds[$supplier] = DB::table('suppliers')->insertGetId([
                 'name' => $supplier,
+                'branch_id' => $branchId,
                 'currency' => 'KZT',
                 'default_lead_time_days' => 7,
                 'minimum_order_value' => 0,
@@ -707,7 +766,8 @@ class InventoryExcelService
         foreach ($payload['supplyRows'] as $row) {
             if (! isset($orderIds[$row['order_number']])) {
                 $orderIds[$row['order_number']] = DB::table('purchase_orders')->insertGetId([
-                    'order_number' => $row['order_number'],
+                    'order_number' => 'B'.$branchId.'-'.$row['order_number'],
+                    'branch_id' => $branchId,
                     'supplier_id' => $supplierIds[$row['supplier']],
                     'warehouse_id' => reset($warehouseIds) ?: null,
                     'status' => $row['status'] === 'в пути' ? 'in_transit' : 'confirmed',
@@ -737,6 +797,7 @@ class InventoryExcelService
         foreach ($payload['productRows'] as $product) {
             DB::table('product_planning_settings')->insert([
                 'product_id' => $product['id'],
+                'branch_id' => $branchId,
                 'supplier_id' => $supplierByProduct[$product['id']] ?? null,
                 'safety_stock_days' => 14,
                 'target_cover_days' => 45,

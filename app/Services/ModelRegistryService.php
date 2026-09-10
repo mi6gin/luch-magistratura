@@ -8,7 +8,7 @@ use JsonException;
 
 class ModelRegistryService
 {
-    public function __construct(private readonly ResearchExperimentService $experiments) {}
+    public function __construct(private readonly ResearchExperimentService $experiments, private readonly BranchContext $branches) {}
 
     public function state(): array
     {
@@ -162,7 +162,7 @@ class ModelRegistryService
 
     private function packagePolicy(string $id, string $experimentId, string $sourceModel, array $routes): string
     {
-        $directory = rtrim((string) config('rayventory.models_path', storage_path('app/models')), '/').'/'.$id;
+        $directory = $this->branches->scopedPath((string) config('rayventory.models_path', storage_path('app/models'))).'/'.$id;
         File::ensureDirectoryExists($directory);
         $path = $directory.'/manifest.json';
         File::put($path, json_encode([
@@ -179,6 +179,8 @@ class ModelRegistryService
 
     private function path(): string
     {
-        return (string) config('rayventory.model_registry_path', storage_path('app/model-registry/registry.json'));
+        $base = (string) config('rayventory.model_registry_path', storage_path('app/model-registry/registry.json'));
+
+        return $this->branches->scopedPath(dirname($base)).'/'.basename($base);
     }
 }

@@ -13,6 +13,7 @@ class LocalModelPipelineService
     public function __construct(
         private readonly LocalTrainingService $training,
         private readonly ModelRegistryService $registry,
+        private readonly BranchContext $branches,
     ) {}
 
     public function schedule(string $trigger = 'manual'): array
@@ -32,10 +33,11 @@ class LocalModelPipelineService
             'message' => $readiness['ready'] ? 'Локальный эксперимент поставлен в очередь.' : $readiness['message'],
             'experiment_id' => null,
             'candidate_id' => null,
+            'branch_id' => $this->branches->id(),
         ];
         $this->save($status);
         if ($readiness['ready']) {
-            RunLocalTrainingPipeline::dispatchAfterResponse($id);
+            RunLocalTrainingPipeline::dispatchAfterResponse($id, $this->branches->id());
         }
 
         return $status;
@@ -49,21 +51,22 @@ class LocalModelPipelineService
         }
         try {
             $status = $this->update($status, 'preparing', 'Подготавливаем приватный набор из SQLite.');
-            $dataDirectory = (string) config('rayventory.local_training_data_path', base_path('data/processed/local-inventory'));
+            $dataDirectory = $this->branches->scopedPath((string) config('rayventory.local_training_data_path', base_path('data/processed/local-inventory')));
             $this->run([
                 'prepare-local', '--database', (string) config('rayventory.database_path'),
-                '--output-dir', $dataDirectory,
+                '--output-dir', $dataDirectory, '--branch-id', (string) $this->branches->id(),
             ]);
             $status = $this->update($status, 'analyzing', 'Анализируем спрос, сезонность и внешние факторы.');
             $this->run([
                 'analyze', '--data', $dataDirectory.'/local_inventory.csv.gz',
                 '--manifest', $dataDirectory.'/manifest.json',
-                '--output', (string) config('rayventory.dataset_analysis_path'),
+                '--output', $this->branches->scopedPath(dirname((string) config('rayventory.dataset_analysis_path'))).'/latest.json',
             ]);
             $status = $this->update($status, 'evaluating', 'Сравниваем безопасные методы на rolling-окнах.');
             $result = $this->run([
                 'train', '--data', $dataDirectory.'/local_inventory.csv.gz',
                 '--manifest', $dataDirectory.'/manifest.json',
+                '--output', $this->branches->scopedPath((string) config('rayventory.experiments_path')),
                 '--models', '--folds', '3', '--summary',
             ]);
             $candidate = $this->registry->registerCandidate($result['experiment_id'], 'risk_calibrated_router');
@@ -146,6 +149,6 @@ class LocalModelPipelineService
 
     private function directory(): string
     {
-        return (string) config('rayventory.training_jobs_path', storage_path('app/training-jobs'));
+        return $this->branches->scopedPath((string) config('rayventory.training_jobs_path', storage_path('app/training-jobs')));
     }
 }

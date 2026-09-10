@@ -6,9 +6,11 @@ use Illuminate\Support\Facades\File;
 
 class ResearchTuningService
 {
+    public function __construct(private readonly BranchContext $branches) {}
+
     public function latest(): ?array
     {
-        $directory = (string) config('rayventory.tuning_path', storage_path('app/tuning'));
+        $directory = $this->branches->scopedPath((string) config('rayventory.tuning_path', storage_path('app/tuning')));
         if (! File::isDirectory($directory)) {
             return null;
         }

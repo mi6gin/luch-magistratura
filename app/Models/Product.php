@@ -19,6 +19,11 @@ class Product extends Model
         return $this->hasOne(WarehouseStock::class, 'product_id');
     }
 
+    public function branchProducts(): HasMany
+    {
+        return $this->hasMany(BranchProduct::class, 'product_id');
+    }
+
     public function warehouseInTransit(): HasOne
     {
         return $this->hasOne(WarehouseInTransit::class, 'product_id');

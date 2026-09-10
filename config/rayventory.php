@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'admin_email' => env('RAYVENTORY_ADMIN_EMAIL', 'admin@rayventory.local'),
+    'admin_password' => env('RAYVENTORY_ADMIN_PASSWORD'),
     'python' => env('ML_PYTHON', 'py'),
     'engine_path' => env('ML_ENGINE_PATH', base_path('ml/predict_cli.py')),
     'database_path' => env(
