@@ -1,5 +1,7 @@
 # Rayventory
 
+[![Quality](https://github.com/mi6gin/luch-magistratura/actions/workflows/quality.yml/badge.svg)](https://github.com/mi6gin/luch-magistratura/actions/workflows/quality.yml)
+
 Rayventory — локальная многопользовательская система прогнозирования товарных
 запасов для сети филиалов. Веб-часть написана на Laravel 12, прогнозирование и
 отчёты — на Python, хранилище — SQLite.
@@ -15,7 +17,7 @@ Node.js и сборка фронтенда не нужны: интерфейс �
 - Корень проекта содержит `artisan`, `composer.json` и каталог `ml/`.
 - Требуются PHP 8.2+, Composer 2, Python 3.11+ и PHP-расширения
   `pdo_sqlite`, `sqlite3`, `mbstring`, `zip`, `gd`.
-- Проверенное CI-окружение: PHP 8.5 и Python 3.12.
+- Проверенное CI-окружение: PHP 8.2, Python 3.12 и Node.js 24.
 - Обычное приложение: `.venv` + `requirements.txt`.
 - Все Python-тесты и исследования: `.venv-ml` + `requirements-ml.txt`.
   Расширенный набор включает runtime-зависимости, PyTorch, Kaggle и `openpyxl`.
@@ -69,6 +71,27 @@ Laravel routes → ApiController → Services / Eloquent
 | `tests/Feature/ApplicationTest.php` | Интеграционные тесты Laravel |
 | `ml/tests/` | Python-тесты |
 
+## Интерфейс и правила фронтенда
+
+- `public/css/tokens.css` хранит палитру и базовые дизайн-токены; новые цвета и
+  размеры сначала добавляются туда, а не размножаются по страницам.
+- `public/css/dynamic.css` отвечает за живые операционные элементы: карту
+  запасов, поток событий, этапы принятия решения, KPI симулятора, карточки сети,
+  переходы и режим презентации.
+- `public/js/app.js` — единая точка клиентской логики. Данные берутся только из
+  API активного филиала; ключи `localStorage` с прогнозами и выбранным товаром
+  формируются через `branchStorageKey`, чтобы состояния филиалов не смешивались.
+- Дашборд показывает не декоративную анимацию, а актуальные остатки, стоимость,
+  критические позиции и журнал операций. Узлы карты и риск-события открывают
+  симулятор для выбранного товара.
+- Симулятор запускает первый расчёт автоматически, пересчитывается после смены
+  товара или промо-признака и позволяет отдельно показывать спрос или остаток.
+- Любая новая анимация обязана иметь статичное поведение внутри
+  `@media (prefers-reduced-motion: reduce)`. На ширине 390 px не должно быть
+  горизонтального переполнения.
+- После изменений интерфейса проверить вход, `/`, `/simulator`, `/settings`,
+  переключение филиала и отсутствие данных одного филиала в другом.
+
 ## Установка с чистого клона
 
 Все команды выполняются из корня репозитория.
@@ -112,6 +135,18 @@ RAYVENTORY_ADMIN_PASSWORD=<уникальный пароль длиной не �
 ```
 
 Обязательно задайте пароль до первого запуска вне личного компьютера.
+
+Для локальной демонстрации seeder также создаёт две изолированные учётные
+записи филиалов:
+
+| Филиал | Логин | Пароль |
+|---|---|---|
+| Макеновский | `makenovsky@rayventory.local` | `Makenovsky#2026` |
+| Приханский | `prikhansky@rayventory.local` | `Prikhansky#2026` |
+
+Каждый пользователь имеет роль администратора только в своём филиале и не видит
+данные другого. Эти учётные записи предназначены исключительно для локальной
+демонстрации и не создаются при `APP_ENV=production`.
 
 Сайт откроется на <http://127.0.0.1:8000>. Для фонового обучения во втором
 терминале:
@@ -186,7 +221,7 @@ vendor/bin/pint --test
 .venv/bin/python -m compileall -q ml
 ```
 
-На момент написания ожидается не менее `20 tests, 101 assertions`. `phpunit.xml`
+На момент написания ожидается не менее `22 tests, 128 assertions`. `phpunit.xml`
 задаёт отдельный тестовый `APP_KEY` и использует SQLite `:memory:`.
 
 ### Полный Python-набор
@@ -214,20 +249,30 @@ php artisan route:list --except-vendor
 
 ### Эквивалент CI
 
-`.github/workflows/quality.yml` использует PHP 8.5 и Python 3.12:
+`.github/workflows/quality.yml` запускается для каждого pull request и push в
+`main`. Проверки разделены на независимые задания PHP, Python, JavaScript,
+аудита зависимостей и сборки Docker. Устаревший запуск для той же ветки
+автоматически отменяется.
+
+Локальный эквивалент основных проверок:
 
 ```bash
 composer install --no-interaction --prefer-dist
-python3.12 -m venv .venv-ml
-.venv-ml/bin/python -m pip install -r requirements-ml.txt
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 composer test
 vendor/bin/pint --test
-.venv-ml/bin/python -m compileall -q ml
-.venv-ml/bin/python -m unittest discover -s ml/tests -p 'test_*.py'
+.venv/bin/python -m compileall -q ml
+.venv/bin/python -m unittest discover -s ml/tests -p 'test_*.py'
+node --check public/js/app.js
+composer audit --locked --no-interaction
 docker build -t rayventory-ci .
 ```
 
 Тестовый ключ хранится только в `phpunit.xml` и не используется приложением.
+Dependabot еженедельно проверяет Composer, pip, GitHub Actions и базовый Docker-
+образ. В настройках GitHub рекомендуется включить защиту ветки `main`, запретить
+прямой push и сделать все пять заданий workflow `Quality` обязательными.
 
 ## Docker
 
@@ -267,9 +312,10 @@ docker compose down
 | `SESSION_SECURE_COOKIE` | Передавать cookie только по HTTPS | локально `false`, production `true` |
 | `SESSION_SAME_SITE` | Защита cookie от межсайтовых запросов | `lax` |
 | `HASH_DRIVER` | Хеширование паролей | `argon2id` |
+| `HASH_VERIFY_ALGORITHM` | Требовать совпадение алгоритма; `false` мигрирует старые bcrypt-хеши в Argon2id при входе | `false` |
 | `RAYVENTORY_ADMIN_EMAIL` | Email первого администратора | `admin@rayventory.local` |
 | `RAYVENTORY_ADMIN_PASSWORD` | Пароль первого администратора | заменить перед установкой |
-| `ML_PYTHON` | Python runtime | в шаблоне `py`; локально указать `.venv` |
+| `ML_PYTHON` | Python runtime | в шаблоне `python3`; локально лучше указать `.venv` |
 | `ML_RESEARCH_PYTHON` | Python исследований | fallback на `ML_PYTHON` |
 | `ML_ENGINE_PATH` | Production CLI | `ml/predict_cli.py` |
 | `ML_DB_PATH` | База для Python | fallback на `DB_DATABASE` |
@@ -482,6 +528,7 @@ Candidate проверяется на минимум трёх rolling-окнах
 | `GET /api/branches-summary` | Центральная сводка |
 | `GET/POST /api/users` | Пользователи и роли |
 | `GET /api/dashboard-stats` | Показатели склада |
+| `GET /api/activity-events` | Последние операции активного филиала |
 | `GET /api/stock` | Товары и остатки |
 | `POST /api/stock/update` | Обновить остаток |
 | `GET /api/purchase-plan` | Рассчитать закупки |

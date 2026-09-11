@@ -10,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body data-page="{{ $page ?? '' }}">
+<div class="route-progress" id="route-progress" aria-hidden="true"><span></span></div>
 <div class="app-shell">
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="{{ route('dashboard') }}"><img class="brand-logo" src="{{ asset('logo-luch.png') }}" alt="ЛУЧ · магазин у дома"><span><b>RAYVENTORY</b><small>INTELLIGENCE OS</small></span></a>
@@ -33,6 +34,7 @@
     </div>
 </div>
 <div id="toast-container" class="toast-container"></div>
+<div class="screen-reader-status" id="screen-reader-status" role="status" aria-live="polite"></div>
 <div id="command-palette" class="command-overlay" aria-hidden="true">
     <div class="command-palette" role="dialog" aria-modal="true" aria-label="Командная палитра">
         <div class="command-search"><span>⌕</span><input id="command-search" type="search" placeholder="Куда перейти или что сделать?"><kbd>ESC</kbd></div>

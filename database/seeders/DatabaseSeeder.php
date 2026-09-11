@@ -24,6 +24,9 @@ class DatabaseSeeder extends Seeder
         foreach (Branch::pluck('id') as $branchId) {
             $user->branches()->syncWithoutDetaching([$branchId => ['role' => 'admin']]);
         }
+        if (! app()->environment('production')) {
+            $this->seedDemoBranchUsers();
+        }
         if (DB::table('products')->exists()) {
             return;
         }
@@ -65,6 +68,33 @@ class DatabaseSeeder extends Seeder
                 'branch_id' => $branchId, 'product_id' => $id, 'current_quantity' => 30 + $index * 8,
                 'warehouse' => 'Главный склад', 'as_of_date' => today()->toDateString(), 'reserved_quantity' => 0,
             ]);
+        }
+    }
+
+    private function seedDemoBranchUsers(): void
+    {
+        $organizationId = (int) DB::table('organizations')->orderBy('id')->value('id');
+        $accounts = [
+            [
+                'branch' => ['name' => 'Макеновский филиал', 'code' => 'makenovsky'],
+                'user' => ['name' => 'Макеновский филиал', 'email' => 'makenovsky@rayventory.local', 'password' => 'Makenovsky#2026'],
+            ],
+            [
+                'branch' => ['name' => 'Приханский филиал', 'code' => 'prikhansky'],
+                'user' => ['name' => 'Приханский филиал', 'email' => 'prikhansky@rayventory.local', 'password' => 'Prikhansky#2026'],
+            ],
+        ];
+
+        foreach ($accounts as $account) {
+            $branch = Branch::firstOrCreate(
+                ['organization_id' => $organizationId, 'code' => $account['branch']['code']],
+                ['name' => $account['branch']['name'], 'active' => true],
+            );
+            $demoUser = User::firstOrCreate(
+                ['email' => $account['user']['email']],
+                ['name' => $account['user']['name'], 'password' => $account['user']['password'], 'is_admin' => false],
+            );
+            $demoUser->branches()->syncWithoutDetaching([$branch->id => ['role' => 'admin']]);
         }
     }
 }

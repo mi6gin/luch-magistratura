@@ -81,15 +81,57 @@ class ApiController extends Controller
     {
         abort_unless($request->user()?->is_admin, 403);
         $summary = Branch::query()->where('active', true)->orderBy('name')->get()->map(function (Branch $branch): array {
+            $stock = DB::table('warehouse_stock as ws')
+                ->join('branch_products as bp', function ($join): void {
+                    $join->on('bp.product_id', '=', 'ws.product_id')->on('bp.branch_id', '=', 'ws.branch_id');
+                })
+                ->where('ws.branch_id', $branch->id);
+
             return [
                 'id' => $branch->id, 'name' => $branch->name,
                 'products' => DB::table('branch_products')->where('branch_id', $branch->id)->count(),
                 'sales_rows' => DB::table('sales_history')->where('branch_id', $branch->id)->count(),
                 'stock_units' => (int) DB::table('warehouse_stock')->where('branch_id', $branch->id)->sum('current_quantity'),
+                'stock_value' => round((float) (clone $stock)->sum(DB::raw('ws.current_quantity * bp.unit_price')), 2),
+                'critical_count' => (clone $stock)->where('ws.current_quantity', '<', 50)->count(),
+                'users' => DB::table('branch_user')->where('branch_id', $branch->id)->count(),
+                'last_sale_date' => DB::table('sales_history')->where('branch_id', $branch->id)->max('sale_date'),
             ];
         });
 
         return response()->json(['branches' => $summary]);
+    }
+
+    public function activityEvents(): JsonResponse
+    {
+        $events = DB::table('audit_logs as logs')
+            ->leftJoin('users', 'users.id', '=', 'logs.user_id')
+            ->where('logs.branch_id', $this->branches->id())
+            ->orderByDesc('logs.id')
+            ->limit(12)
+            ->get(['logs.id', 'logs.method', 'logs.path', 'logs.status', 'logs.created_at', 'users.name as user_name'])
+            ->map(function ($event): array {
+                $type = str_contains($event->path, 'inventory/import') ? 'import'
+                    : (str_contains($event->path, 'training') || str_contains($event->path, 'models') ? 'model'
+                    : (str_contains($event->path, 'stock/update') ? 'stock' : 'system'));
+                $labels = [
+                    'import' => 'Обновлены данные из Excel',
+                    'model' => 'Изменён контур прогнозирования',
+                    'stock' => 'Скорректирован остаток товара',
+                    'system' => 'Выполнена операция в системе',
+                ];
+
+                return [
+                    'id' => (int) $event->id,
+                    'type' => $type,
+                    'title' => $labels[$type],
+                    'actor' => $event->user_name ?: 'Система',
+                    'status' => (int) $event->status,
+                    'created_at' => $event->created_at,
+                ];
+            });
+
+        return response()->json(['events' => $events]);
     }
 
     public function users(Request $request): JsonResponse

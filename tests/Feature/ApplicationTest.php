@@ -27,6 +27,21 @@ class ApplicationTest extends TestCase
         $this->assertAuthenticatedAs($this->user);
     }
 
+    public function test_legacy_bcrypt_password_is_rehashed_to_argon2id_after_login(): void
+    {
+        auth()->logout();
+        $legacyHash = password_hash('Legacy#Pass123', PASSWORD_BCRYPT, ['cost' => 10]);
+        \DB::table('users')->where('id', $this->user->id)->update(['password' => $legacyHash]);
+
+        $this->post('/login', ['email' => 'admin@example.test', 'password' => 'Legacy#Pass123'])
+            ->assertRedirect('/');
+
+        $newHash = \DB::table('users')->where('id', $this->user->id)->value('password');
+        $this->assertAuthenticatedAs($this->user);
+        $this->assertStringStartsWith('$argon2id$', $newHash);
+        $this->assertTrue(Hash::check('Legacy#Pass123', $newHash));
+    }
+
     public function test_login_is_rate_limited_and_does_not_create_persistent_login(): void
     {
         auth()->logout();
@@ -75,6 +90,25 @@ class ApplicationTest extends TestCase
             'user_id' => $this->user->id, 'branch_id' => 1,
             'method' => 'POST', 'path' => 'api/branches', 'status' => 201,
         ]);
+    }
+
+    public function test_dashboard_activity_and_branch_command_summary_are_scoped(): void
+    {
+        \DB::table('products')->insert(['id' => 1, 'sku' => 'MAP-1', 'name' => 'Map item', 'category' => 'Demo', 'lead_time' => 3, 'unit_price' => 100]);
+        \DB::table('branch_products')->insert(['branch_id' => 1, 'product_id' => 1, 'lead_time' => 3, 'unit_price' => 100, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $this->postJson('/api/stock/update', ['product_id' => 1, 'quantity' => 12])->assertOk();
+
+        $this->getJson('/api/activity-events')
+            ->assertOk()
+            ->assertJsonPath('events.0.type', 'stock')
+            ->assertJsonPath('events.0.actor', 'Test Admin');
+
+        $this->getJson('/api/branches-summary')
+            ->assertOk()
+            ->assertJsonStructure(['branches' => [[
+                'id', 'name', 'products', 'sales_rows', 'stock_units', 'stock_value',
+                'critical_count', 'users', 'last_sale_date',
+            ]]]);
     }
 
     public function test_guest_is_redirected_to_login_and_viewer_cannot_mutate(): void

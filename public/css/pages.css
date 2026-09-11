@@ -120,7 +120,7 @@
 .calendar-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-item strong { flex: 0 0 auto; }
 .calendar-empty { grid-column: 1 / -1; color: var(--muted); }
-.quality-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.quality-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .quality-grid article { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--soft); }
 .quality-grid small { display: block; min-height: 28px; color: var(--muted); font-size: 10px; }
 .quality-grid b { font-size: 18px; }
@@ -137,6 +137,9 @@
 .confidence.low { color: #ff6b87; background: rgba(255, 107, 135, .1); }
 .purchase-explainer-card { width: min(800px, calc(100vw - 28px)); }
 .explain-summary { margin: 14px 0 0; padding: 12px 14px; border-left: 2px solid var(--cyan); color: var(--muted); background: color-mix(in srgb, var(--cyan) 6%, transparent); line-height: 1.55; }
+.explain-reasons { padding: 14px 16px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.explain-reasons b { font-size: 11px; }
+.explain-reasons ol { padding-left: 20px; margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .explain-equation { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; gap: 10px; align-items: center; margin: 24px 0; }
 .explain-equation article { min-width: 0; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); }
 .explain-equation article.result { border-color: rgba(185, 248, 91, .32); background: rgba(185, 248, 91, .07); }

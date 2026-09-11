@@ -298,8 +298,14 @@ def _event_uplifts(history: pd.DataFrame) -> tuple[float, float, int, int]:
     holiday_rows = holiday
     promo_samples = int(promo_only.sum())
     holiday_samples = int(holiday_rows.sum())
-    promo_ratio = _as_float(np.median(ratio[promo_only.to_numpy()]), normal_ratio) / max(normal_ratio, 0.1)
-    holiday_ratio = _as_float(np.median(ratio[holiday_rows.to_numpy()]), normal_ratio) / max(normal_ratio, 0.1)
+    promo_ratio = (
+        _as_float(np.median(ratio[promo_only.to_numpy()]), normal_ratio) / max(normal_ratio, 0.1)
+        if promo_samples else 1.0
+    )
+    holiday_ratio = (
+        _as_float(np.median(ratio[holiday_rows.to_numpy()]), normal_ratio) / max(normal_ratio, 0.1)
+        if holiday_samples else 1.0
+    )
 
     promo_uplift = float(np.clip(promo_ratio if promo_samples >= 3 else 1.0, 1.0, 2.25))
     holiday_uplift = float(np.clip(holiday_ratio if holiday_samples >= 3 else 1.0, 1.0, 3.0))
@@ -545,6 +551,19 @@ def _quality_for_product(history: pd.DataFrame, forecast_start: pd.Timestamp) ->
     }
 
 
+def _quality_warnings(quality: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    if int(quality.get("history_days", 0)) < 56:
+        warnings.append("История короче 8 недель: недельная сезонность может быть нестабильной.")
+    if float(quality.get("completeness_pct", 0.0)) < 80.0:
+        warnings.append("В истории отсутствует более 20% календарных дней.")
+    if float(quality.get("oos_rate_pct", 0.0)) > 10.0:
+        warnings.append("Более 10% спроса восстановлено за периоды отсутствия товара.")
+    if int(quality.get("staleness_days", 0)) > STALE_AFTER_DAYS:
+        warnings.append("Последние продажи устарели; перед заказом обновите данные.")
+    return warnings
+
+
 def forecast_product(
     product_id: int,
     inventory_data: Mapping[str, Any] | None = None,
@@ -604,6 +623,7 @@ def forecast_product(
         "staleness_days": int(stale_days),
         "interval": "unavailable",
     }
+    warnings.extend(_quality_warnings(quality))
 
     rounded = {name: np.round(values.astype(float), 3).tolist() for name, values in projection.items()}
     return {
@@ -656,6 +676,7 @@ def evaluate_baseline(
     q10_parts: list[np.ndarray] = []
     q50_parts: list[np.ndarray] = []
     q90_parts: list[np.ndarray] = []
+    naive_parts: list[np.ndarray] = []
     evaluated_skus = 0
     for product_id, test_group in test.groupby("product_id", sort=False, observed=True):
         history = train.loc[train["product_id"] == product_id]
@@ -670,10 +691,16 @@ def evaluate_baseline(
             known_promo=test_group["is_promo"].to_numpy(dtype=bool),
             known_holiday=test_group["is_holiday"].to_numpy(dtype=bool),
         )
+        dow_last = history.sort_values("sale_date").groupby(
+            history["sale_date"].dt.dayofweek, observed=True
+        )["recovered_demand"].last()
+        fallback = _as_float(history["recovered_demand"].median(), 0.0)
+        naive = np.asarray([_as_float(dow_last.get(int(day)), fallback) for day in dates.dayofweek])
         actual_parts.append(test_group["recovered_demand"].to_numpy(dtype=float))
         q10_parts.append(projection["q10"])
         q50_parts.append(projection["q50"])
         q90_parts.append(projection["q90"])
+        naive_parts.append(naive)
         evaluated_skus += 1
 
     if not actual_parts:
@@ -682,12 +709,15 @@ def evaluate_baseline(
     q10 = np.concatenate(q10_parts)
     predicted = np.concatenate(q50_parts)
     q90 = np.concatenate(q90_parts)
+    naive = np.concatenate(naive_parts)
     denominator = max(float(actual.sum()), 1e-9)
     error = predicted - actual
     coverage = np.mean((actual >= q10) & (actual <= q90)) * 100.0
     wape = round(float(np.abs(error).sum() / denominator * 100.0), 2)
     bias = round(float(error.sum() / denominator * 100.0), 2)
     coverage = round(float(coverage), 2)
+    naive_wape = round(float(np.abs(naive - actual).sum() / denominator * 100.0), 2)
+    improvement = round(naive_wape - wape, 2)
     return {
         "wape": wape,
         "wape_pct": wape,
@@ -702,6 +732,12 @@ def evaluate_baseline(
         "observations": int(actual.size),
         "sku_count": int(evaluated_skus),
         "model": MODEL_NAME,
+        "comparison": {
+            "baseline_model": "seasonal-naive-weekly",
+            "baseline_wape_pct": naive_wape,
+            "wape_improvement_pct": improvement,
+            "verdict": "better" if improvement > 0 else "equal" if improvement == 0 else "worse",
+        },
     }
 
 
@@ -709,6 +745,23 @@ def _stockout_date(forecast: Mapping[str, Any], available: float) -> str | None:
     cumulative = np.cumsum(np.asarray(forecast["q50"], dtype=float))
     indices = np.flatnonzero(cumulative > available)
     return forecast["dates"][int(indices[0])] if indices.size else None
+
+
+def _recommendation_reasons(
+    *, order_quantity: int, stockout: str | None, selected_quantile: str,
+    lead_time: int, available: float, lead_demand: float, quality: Mapping[str, Any],
+) -> list[str]:
+    reasons = [
+        f"На срок поставки {lead_time} дн. ожидается спрос {lead_demand:.1f} ед.; доступно {available:.1f} ед.",
+        f"Расчёт выполнен по сценарию {selected_quantile} с качеством данных {float(quality.get('score', 0)):.0f}/100.",
+    ]
+    if stockout:
+        reasons.append(f"Без пополнения ожидается дефицит {stockout}.")
+    reasons.append(
+        f"Рекомендован заказ {order_quantity} ед." if order_quantity > 0
+        else "Доступного остатка достаточно; заказ пока не требуется."
+    )
+    return reasons
 
 
 def build_report_document(report_type: str = "standard") -> dict[str, Any]:
@@ -737,6 +790,12 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
             "observations": 0,
             "sku_count": 0,
             "model": MODEL_NAME,
+            "comparison": {
+                "baseline_model": "seasonal-naive-weekly",
+                "baseline_wape_pct": 0.0,
+                "wape_improvement_pct": 0.0,
+                "verdict": "unavailable",
+            },
         }
         evaluation_warning = f"Backtesting недоступен: {exc}"
     strategy = STRATEGIES[report_type]
@@ -799,6 +858,16 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
                 "action": action_label,
                 "priority_score": round(priority_score, 2),
                 "quality": forecast["quality"],
+                "reasons": _recommendation_reasons(
+                    order_quantity=order_quantity,
+                    stockout=stockout,
+                    selected_quantile=selected_quantile,
+                    lead_time=lead_time,
+                    available=available,
+                    lead_demand=lead_demand,
+                    quality=forecast["quality"],
+                ),
+                "warnings": forecast["warnings"],
                 "forecast": {
                     "dates": forecast["dates"],
                     "q10": forecast["q10"],

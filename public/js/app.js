@@ -55,6 +55,8 @@
 
     const api = async (url, options = {}) => {
         const { headers = {}, ...requestOptions } = options;
+        const progress = document.querySelector('#route-progress');
+        progress?.classList.add('is-active');
         const response = await fetch(`/api/${url}`, {
             ...requestOptions,
             headers: {
@@ -64,7 +66,7 @@
                 ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
                 ...headers,
             },
-        });
+        }).finally(() => setTimeout(() => progress?.classList.remove('is-active'), 180));
 
         let data;
         try {
@@ -124,6 +126,84 @@
     let allStock = [];
     let purchaseActions = [];
     let purchaseBudget = null;
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const animateNumber = (element, value, formatter = number => Math.round(number).toLocaleString('ru-RU')) => {
+        if (!element) return;
+        if (reduceMotion) {
+            element.textContent = formatter(value);
+            return;
+        }
+        const started = performance.now();
+        const duration = 650;
+        const frame = now => {
+            const progress = Math.min(1, (now - started) / duration);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            element.textContent = formatter(value * eased);
+            if (progress < 1) requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+    };
+
+    function renderInventoryMap(stock) {
+        const map = document.querySelector('#inventory-map');
+        if (!map) return;
+        const nodes = [...stock].sort((a, b) => Number(b.current_quantity) * Number(b.unit_price) - Number(a.current_quantity) * Number(a.unit_price)).slice(0, 14);
+        if (!nodes.length) {
+            map.innerHTML = '<p class="map-empty">В филиале пока нет товаров. Загрузите Excel на странице склада.</p>';
+            return;
+        }
+        const positions = [[50,48],[25,26],[74,25],[20,66],[78,69],[42,18],[58,79],[36,62],[64,48],[10,43],[90,43],[33,84],[67,12],[91,78]];
+        const maxValue = Math.max(...nodes.map(item => Number(item.current_quantity) * Number(item.unit_price)), 1);
+        map.querySelectorAll('.map-node,.map-empty').forEach(item => item.remove());
+        nodes.forEach((item, index) => {
+            const quantity = Number(item.current_quantity);
+            const state = quantity < 25 ? 'danger' : quantity < 50 ? 'watch' : 'ok';
+            const size = 36 + Math.sqrt((quantity * Number(item.unit_price)) / maxValue) * 30;
+            const button = document.createElement('button');
+            button.className = `map-node ${state}`;
+            button.style.cssText = `left:${positions[index][0]}%;top:${positions[index][1]}%;--node-size:${size}px;--delay:${index * 45}ms`;
+            button.setAttribute('aria-label', `${item.name}: ${quantity} штук`);
+            button.innerHTML = `<b>${escapeHtml(item.sku || String(item.id))}</b><small>${escapeHtml(item.name)} · ${quantity} шт.</small>`;
+            button.onclick = () => {
+                localStorage.setItem(branchStorageKey('selected-product'), String(item.id));
+                window.location.href = '/simulator';
+            };
+            map.appendChild(button);
+        });
+    }
+
+    function renderActivity(events, stock) {
+        const stream = document.querySelector('#activity-stream');
+        if (!stream) return;
+        const risks = [...stock].filter(item => Number(item.current_quantity) < 50).sort((a, b) => a.current_quantity - b.current_quantity).slice(0, 3).map((item, index) => ({
+            id: `risk-${item.id}`, type: 'stock', title: `${item.name}: низкий остаток`, actor: `${item.current_quantity} шт. · открыть симулятор`, created_at: null, product_id: item.id, synthetic: true, index,
+        }));
+        const combined = [...risks, ...(events || [])].slice(0, 7);
+        if (!combined.length) {
+            stream.innerHTML = '<p class="map-empty">Событий пока нет — система наблюдает за филиалом.</p>';
+            return;
+        }
+        const icons = { import: '⇩', model: '⌁', stock: '!', system: '◇' };
+        stream.innerHTML = combined.map((event, index) => {
+            const time = event.created_at ? new Date(event.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'сейчас';
+            return `<button class="activity-item ${escapeHtml(event.type || 'system')}" style="--delay:${index * 55}ms" ${event.product_id ? `data-event-product="${event.product_id}"` : ''}><span class="activity-icon">${icons[event.type] || '◇'}</span><span><b>${escapeHtml(event.title)}</b><small>${escapeHtml(event.actor || 'Система')}</small></span><time>${time}</time></button>`;
+        }).join('');
+        stream.querySelectorAll('[data-event-product]').forEach(button => {
+            button.onclick = () => {
+                localStorage.setItem(branchStorageKey('selected-product'), button.dataset.eventProduct);
+                window.location.href = '/simulator';
+            };
+        });
+    }
+
+    function updateDecisionFlow(stock, criticalCount) {
+        const totalUnits = stock.reduce((sum, item) => sum + Number(item.current_quantity), 0);
+        const stockLabel = document.querySelector('#flow-stock');
+        const riskLabel = document.querySelector('#flow-risk');
+        if (stockLabel) stockLabel.textContent = `${Math.round(totalUnits).toLocaleString('ru-RU')} ед. в контуре`;
+        if (riskLabel) riskLabel.textContent = criticalCount ? `${criticalCount} SKU требуют внимания` : 'критических сигналов нет';
+    }
 
     function categoryGraph(categories) {
         const colors = chartStyle();
@@ -168,10 +248,11 @@
 
     async function loadData() {
         try {
-            const [stats, stock, briefing] = await Promise.all([
+            const [stats, stock, briefing, activity] = await Promise.all([
                 api('dashboard-stats'),
                 api('stock'),
                 api('ai-briefing'),
+                page === 'dashboard' ? api('activity-events').catch(() => ({ events: [] })) : Promise.resolve({ events: [] }),
             ]);
             allStock = stock;
             const total = document.querySelector('#total');
@@ -179,17 +260,17 @@
             const brief = document.querySelector('#briefing');
             const modelStatus = document.querySelector('#model-status');
             if (total) {
-                total.textContent = `${Number(stats.total_value).toLocaleString('ru-RU')} ₸`;
+                animateNumber(total, Number(stats.total_value), value => `${Math.round(value).toLocaleString('ru-RU')} ₸`);
                 total.classList.remove('loading-value');
             }
             if (critical) {
-                critical.textContent = `${stats.critical_count} товаров`;
+                animateNumber(critical, Number(stats.critical_count), value => `${Math.round(value)} товаров`);
                 critical.classList.remove('loading-value');
             }
             if (brief) brief.textContent = briefing.briefing;
             if (modelStatus) modelStatus.textContent = stats.model_status || '—';
             const dashboardBody = document.querySelector('#dashboard-stock');
-            if (dashboardBody) dashboardBody.innerHTML = stock.slice(0, 6).map(product => stockRow(product)).join('');
+            if (dashboardBody) dashboardBody.innerHTML = [...stock].sort((a, b) => a.current_quantity - b.current_quantity).slice(0, 6).map(product => stockRow(product)).join('');
             const inventory = document.querySelector('#inventory-stock');
             if (inventory) renderInventory();
             const productSelect = document.querySelector('#sim-product');
@@ -197,6 +278,8 @@
                 productSelect.innerHTML = stock
                     .map(product => `<option value="${product.id}">${escapeHtml(product.name)}</option>`)
                     .join('');
+                const selectedProduct = localStorage.getItem(branchStorageKey('selected-product'));
+                if (selectedProduct && stock.some(product => String(product.id) === selectedProduct)) productSelect.value = selectedProduct;
             }
             const risk = document.querySelector('#risk-index');
             if (risk) {
@@ -205,6 +288,11 @@
                     : 'LOW';
             }
             categoryGraph(stats.categories);
+            const categoryCount = document.querySelector('#category-count');
+            if (categoryCount) categoryCount.textContent = String(stats.categories.length);
+            renderInventoryMap(stock);
+            renderActivity(activity.events, stock);
+            updateDecisionFlow(stock, Number(stats.critical_count));
             document.querySelectorAll('[data-edit]').forEach(element => {
                 element.onclick = () => openStockModal(Number(element.dataset.edit));
             });
@@ -354,8 +442,11 @@
         const item = purchaseActions.find(action => action.product_id === productId);
         if (!item) return;
         document.querySelector('#explain-name').textContent = `${item.sku || ''} · ${item.product_name}`;
+        const reasons = Array.isArray(item.reasons) ? item.reasons : [];
+        const itemWarnings = normalizeWarnings(item.warnings);
         document.querySelector('#explain-content').innerHTML = `
             <p class="explain-summary">Мы берём прогноз спроса на весь срок поставки с учётом выбранного уровня риска, затем вычитаем доступный остаток и уже заказанный товар. Отрицательный результат считается нулём.</p>
+            ${reasons.length ? `<div class="explain-reasons"><b>Почему система рекомендует это действие</b><ol>${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ol></div>` : ''}
             <div class="explain-equation">
                 <article><small>Спрос на срок поставки</small><b>${Number(item.lead_time_demand).toLocaleString('ru-RU')}</b></article>
                 <span>−</span><article><small>Остаток</small><b>${Number(item.on_hand).toLocaleString('ru-RU')}</b></article>
@@ -369,7 +460,8 @@
                 <div><dt>Лучший день заказа</dt><dd>${escapeHtml(item.best_order_date || 'заказ пока не требуется')}</dd></div>
                 <div><dt>Ожидаемый дефицит</dt><dd>${escapeHtml(item.stockout_date || 'не ожидается')}</dd></div>
                 <div><dt>Уверенность</dt><dd>${Number(item.quality?.score || 0).toLocaleString('ru-RU')} / 100</dd></div>
-            </dl>`;
+            </dl>
+            ${itemWarnings.length ? `<div class="report-warnings"><b>Ограничения по этому товару</b><ul>${itemWarnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('')}</ul></div>` : ''}`;
         const modal = document.querySelector('#purchase-explainer');
         modal.classList.add('open');
         modal.setAttribute('aria-hidden', 'false');
@@ -388,6 +480,13 @@
             document.querySelector('#purchase-quality-note').textContent = data.quality.grade === 'high' ? 'высокая уверенность' : data.quality.grade === 'medium' ? 'средняя уверенность' : 'низкая уверенность';
             document.querySelector('#purchase-data-date').textContent = `данные на ${data.data_as_of}`;
             const evaluationAvailable = Number(data.evaluation.sku_count) > 0;
+            const comparison = data.evaluation.comparison || {};
+            const comparisonValue = evaluationAvailable && Number.isFinite(Number(comparison.baseline_wape_pct))
+                ? `${Number(comparison.baseline_wape_pct).toLocaleString('ru-RU')}%`
+                : 'н/д';
+            const improvementValue = evaluationAvailable && Number.isFinite(Number(comparison.wape_improvement_pct))
+                ? `${Number(comparison.wape_improvement_pct) > 0 ? '+' : ''}${Number(comparison.wape_improvement_pct).toLocaleString('ru-RU')} п.п.`
+                : 'н/д';
             document.querySelector('#quality-grid').innerHTML = [
                 ['Полнота истории', `${data.quality.average_completeness_pct}%`],
                 ['Свежесть', `${data.quality.freshness_days} дн.`],
@@ -395,6 +494,8 @@
                 ['Bias', evaluationAvailable ? `${data.evaluation.bias_pct}%` : 'н/д'],
                 ['Покрытие q10–q90', evaluationAvailable ? `${data.evaluation.coverage_pct}%` : 'н/д'],
                 ['SKU проверено', data.evaluation.sku_count],
+                ['Простой недельный прогноз', comparisonValue],
+                ['Выигрыш модели', improvementValue],
             ].map(([label, value]) => `<article><small>${label}</small><b>${value}</b></article>`).join('');
             const warningBox = document.querySelector('#purchase-warnings');
             if (data.warnings?.length) {
@@ -849,6 +950,38 @@
             },
         });
         document.querySelector('#chart-empty')?.classList.add('hidden');
+        applyChartMode(document.querySelector('[data-chart-mode].is-active')?.dataset.chartMode || 'all');
+    }
+
+    function applyChartMode(mode) {
+        if (!forecastChart) return;
+        forecastChart.data.datasets.forEach(dataset => {
+            const stockSeries = dataset.label.toLowerCase().includes('остаток') || dataset.label.toLowerCase().includes('запас');
+            dataset.hidden = mode === 'demand' ? stockSeries : mode === 'stock' ? !stockSeries : false;
+        });
+        forecastChart.update();
+    }
+
+    function updateSimulationKpis(data) {
+        const q50 = Array.isArray(data.q50) ? data.q50 : data.demand || [];
+        const q10 = data.q10 || [];
+        const q90 = data.q90 || [];
+        const stock = data.stock || [];
+        const sum = values => values.reduce((total, value) => total + Number(value || 0), 0);
+        const demandTotal = document.querySelector('#sim-demand-total');
+        const stockEnd = document.querySelector('#sim-stock-end');
+        const range = document.querySelector('#sim-demand-range');
+        const quality = document.querySelector('#sim-quality');
+        if (demandTotal) demandTotal.textContent = `${Math.round(sum(q50)).toLocaleString('ru-RU')} ед.`;
+        if (stockEnd) stockEnd.textContent = `${Math.round(Number(stock.at(-1) || 0)).toLocaleString('ru-RU')} ед.`;
+        if (range) range.textContent = `${Math.round(sum(q10)).toLocaleString('ru-RU')} → ${Math.round(sum(q90)).toLocaleString('ru-RU')}`;
+        if (quality) quality.textContent = `${Number(data.quality?.score || 0).toLocaleString('ru-RU')} / 100`;
+        const note = document.querySelector('#sim-quality-note');
+        if (note) note.textContent = data.quality?.grade === 'high' ? 'высокая уверенность' : data.quality?.grade === 'medium' ? 'средняя уверенность' : 'нужна осторожность';
+        document.querySelectorAll('#simulation-kpis article').forEach((card, index) => {
+            card.classList.remove('value-pulse');
+            setTimeout(() => card.classList.add('value-pulse'), index * 45);
+        });
     }
 
     const simulationPayload = () => ({
@@ -885,6 +1018,7 @@
             createdAt: new Date().toISOString(),
         }));
         renderForecast(data);
+        updateSimulationKpis(data);
         const status = document.querySelector('#simulation-status');
         if (status) status.textContent = simulationStatus(data, suffix || new Date().toLocaleTimeString('ru-RU', {
             hour: '2-digit',
@@ -918,12 +1052,13 @@
     }
 
     function restoreLastForecast() {
-        if (page !== 'simulator') return;
+        if (page !== 'simulator') return false;
         try {
             const saved = JSON.parse(localStorage.getItem(branchStorageKey('last-forecast')) || 'null');
-            if (!saved?.data?.dates?.length) return;
+            if (!saved?.data?.dates?.length) return false;
             applySimulationPayload(saved.payload);
             renderForecast(saved.data);
+            updateSimulationKpis(saved.data);
             const warnings = normalizeWarnings(saved.data.warnings);
             const time = new Date(saved.createdAt).toLocaleTimeString('ru-RU', {
                 hour: '2-digit',
@@ -934,8 +1069,10 @@
                 `последний расчёт ${time}`,
             );
             if (warnings.length) document.querySelector('#chart-empty')?.classList.add('hidden');
+            return true;
         } catch (error) {
             localStorage.removeItem(branchStorageKey('last-forecast'));
+            return false;
         }
     }
 
@@ -1117,6 +1254,18 @@
         if (event.target.id === 'stock-modal') closeStockModal();
     });
     document.querySelector('#run-simulation')?.addEventListener('click', runSimulationAsync);
+    document.querySelectorAll('[data-chart-mode]').forEach(button => button.addEventListener('click', () => {
+        document.querySelectorAll('[data-chart-mode]').forEach(item => item.classList.toggle('is-active', item === button));
+        applyChartMode(button.dataset.chartMode);
+    }));
+    let simulationTimer;
+    const scheduleSimulation = () => {
+        if (page !== 'simulator' || !document.querySelector('#sim-product')?.value) return;
+        clearTimeout(simulationTimer);
+        simulationTimer = setTimeout(runSimulationAsync, 280);
+    };
+    document.querySelector('#sim-product')?.addEventListener('change', scheduleSimulation);
+    document.querySelector('#sim-promo')?.addEventListener('change', scheduleSimulation);
     document.querySelectorAll('.report-action').forEach(button => {
         button.addEventListener('click', () => report(button.dataset.type, button));
     });
@@ -1129,7 +1278,7 @@
             }
         }), { threshold: 0.12 })
         : null;
-    document.querySelectorAll('.panel,.metric-card,.quick-card,.report-card,.knowledge-card')
+    document.querySelectorAll('.panel,.metric-card,.quick-card,.report-card,.knowledge-card,.simulation-kpis article,.branch-command-card')
         .forEach((element, index) => {
             element.classList.add('reveal');
             element.style.transitionDelay = `${Math.min(index * 35, 280)}ms`;
@@ -1145,6 +1294,39 @@
     document.querySelectorAll('#total,#critical,#briefing').forEach(element => {
         new MutationObserver(() => pulseValue(element))
             .observe(element, { childList: true, characterData: true, subtree: true });
+    });
+
+    document.querySelectorAll('a[href^="/"]').forEach(link => link.addEventListener('click', event => {
+        if (reduceMotion || event.metaKey || event.ctrlKey || event.shiftKey || link.target === '_blank') return;
+        const target = new URL(link.href, window.location.href);
+        if (target.origin !== window.location.origin || target.pathname === window.location.pathname) return;
+        event.preventDefault();
+        document.body.classList.add('page-leaving');
+        document.querySelector('#route-progress')?.classList.add('is-active');
+        setTimeout(() => { window.location.href = target.href; }, 150);
+    }));
+
+    if (!reduceMotion) {
+        document.querySelectorAll('[data-tilt]').forEach(card => {
+            card.addEventListener('pointermove', event => {
+                const rect = card.getBoundingClientRect();
+                const x = (event.clientX - rect.left) / rect.width - 0.5;
+                const y = (event.clientY - rect.top) / rect.height - 0.5;
+                card.style.transform = `perspective(700px) rotateX(${-y * 3}deg) rotateY(${x * 4}deg) translateY(-2px)`;
+            });
+            card.addEventListener('pointerleave', () => { card.style.transform = ''; });
+        });
+    }
+
+    const setPresentationMode = enabled => {
+        document.body.classList.toggle('presentation-mode', enabled);
+        if (enabled) document.documentElement.requestFullscreen?.().catch(() => {});
+        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    };
+    document.querySelector('#presentation-mode')?.addEventListener('click', () => setPresentationMode(true));
+    document.querySelector('#presentation-exit')?.addEventListener('click', () => setPresentationMode(false));
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && document.body.classList.contains('presentation-mode')) setPresentationMode(false);
     });
 
     let refreshTimer;
@@ -1246,9 +1428,14 @@
     async function loadUsers() {
         const [data, summary] = await Promise.all([api('users'), api('branches-summary')]);
         const table = document.querySelector('#users-table');
-        if (table) table.innerHTML = data.users.map(user => `<tr><td>${escapeHtml(user.name)}</td><td>${escapeHtml(user.email)}</td><td>${user.branches.map(branch => escapeHtml(branch.name)).join(', ') || '—'}</td></tr>`).join('');
+        if (table) table.innerHTML = data.users.map(user => `<tr><td><b>${escapeHtml(user.name)}</b><span class="table-subline">${user.is_admin ? 'Глобальный администратор' : 'Пользователь филиала'}</span></td><td>${escapeHtml(user.email)}</td><td>${user.branches.map(branch => `<span class="status-pill">${escapeHtml(branch.name)}</span>`).join(' ') || '—'}</td></tr>`).join('');
         const summaryTable = document.querySelector('#branches-summary-table');
-        if (summaryTable) summaryTable.innerHTML = summary.branches.map(branch => `<tr><td>${escapeHtml(branch.name)}</td><td>${branch.products}</td><td>${branch.sales_rows}</td><td>${Number(branch.stock_units).toLocaleString('ru-RU')}</td></tr>`).join('');
+        if (summaryTable) summaryTable.innerHTML = summary.branches.map(branch => `<tr><td><b>${escapeHtml(branch.name)}</b><span class="table-subline">${branch.users} польз.</span></td><td>${branch.products}</td><td>${Number(branch.sales_rows).toLocaleString('ru-RU')}</td><td>${Number(branch.stock_units).toLocaleString('ru-RU')}</td><td><span class="confidence ${branch.critical_count ? 'low' : 'high'}">${branch.critical_count} SKU</span></td><td>${escapeHtml(branch.last_sale_date || 'нет данных')}</td></tr>`).join('');
+        const grid = document.querySelector('#branch-command-grid');
+        if (grid) grid.innerHTML = summary.branches.map(branch => {
+            const riskShare = branch.products ? Math.min(100, Number(branch.critical_count) / Number(branch.products) * 100) : 0;
+            return `<article class="branch-command-card"><header><b>${escapeHtml(branch.name)}</b><span>${branch.users} польз.</span></header><div class="branch-command-metrics"><div><small>Капитал</small><b>${Math.round(Number(branch.stock_value)).toLocaleString('ru-RU')} ₸</b></div><div><small>SKU</small><b>${branch.products}</b></div><div><small>Риск</small><b>${branch.critical_count}</b></div></div><div class="branch-command-health" title="Доля SKU в риске"><i style="width:${riskShare}%"></i></div></article>`;
+        }).join('');
     }
 
     document.querySelector('#user-create-form')?.addEventListener('submit', async event => {
@@ -1294,7 +1481,9 @@
     initializeBranch().then(() => {
         restoreLastReport();
         if (page === 'dashboard' || page === 'inventory') loadData();
-        if (page === 'simulator') loadData().finally(restoreLastForecast);
+        if (page === 'simulator') loadData().then(() => {
+            if (!restoreLastForecast()) runSimulationAsync();
+        });
         if (page === 'purchases') loadPurchasePlan();
         if (page === 'model-health') loadModelHealth();
         if (page === 'experiments') {

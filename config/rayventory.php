@@ -3,7 +3,7 @@
 return [
     'admin_email' => env('RAYVENTORY_ADMIN_EMAIL', 'admin@rayventory.local'),
     'admin_password' => env('RAYVENTORY_ADMIN_PASSWORD'),
-    'python' => env('ML_PYTHON', 'py'),
+    'python' => env('ML_PYTHON', 'python3'),
     'engine_path' => env('ML_ENGINE_PATH', base_path('ml/predict_cli.py')),
     'database_path' => env(
         'ML_DB_PATH',
@@ -14,7 +14,7 @@ return [
     'model_registry_path' => env('ML_MODEL_REGISTRY_PATH') ?: storage_path('app/model-registry/registry.json'),
     'models_path' => env('ML_MODELS_PATH') ?: storage_path('app/models'),
     'training_jobs_path' => env('ML_TRAINING_JOBS_PATH') ?: storage_path('app/training-jobs'),
-    'research_python' => env('ML_RESEARCH_PYTHON') ?: env('ML_PYTHON', 'py'),
+    'research_python' => env('ML_RESEARCH_PYTHON') ?: env('ML_PYTHON', 'python3'),
     'training_timeout' => env('ML_TRAINING_TIMEOUT', 3600),
     'local_training_data_path' => env('ML_LOCAL_DATA_PATH') ?: base_path('data/processed/local-inventory'),
     'dataset_analysis_path' => env('ML_DATASET_ANALYSIS_PATH') ?: storage_path('app/dataset-analysis/latest.json'),

@@ -12,6 +12,7 @@ Route::middleware(['web', 'auth', 'branch.access', 'audit'])->group(function ():
     Route::post('users', [ApiController::class, 'createUser']);
     Route::post('account/password', [ApiController::class, 'changePassword']);
     Route::get('dashboard-stats', [ApiController::class, 'dashboardStats']);
+    Route::get('activity-events', [ApiController::class, 'activityEvents']);
     Route::get('stock', [ApiController::class, 'stock']);
     Route::get('purchase-plan', [ApiController::class, 'purchasePlan']);
     Route::post('purchase-plan/export', [ApiController::class, 'exportPurchasePlan']);

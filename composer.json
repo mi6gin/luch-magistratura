@@ -2,6 +2,7 @@
     "name": "rayventory/inventory-forecasting",
     "type": "project",
     "description": "Rayventory inventory forecasting system",
+    "license": "proprietary",
     "require": {
         "php": "^8.2",
         "laravel/framework": "^12.0",
