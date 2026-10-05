@@ -8,13 +8,3 @@
 - Исследовательские прототипы LSTM, GRU и Transformer.
 
 **Стек:** Laravel 12, Python, PyTorch, SQLite, JavaScript.
-
-**Требования:** PHP 8.2+, Composer 2, Python 3.11+.
-
-После установки зависимостей и настройки `.env` запуск на Windows:
-
-```powershell
-./scripts/start-local.ps1 -Mode web
-```
-
-Приложение доступно по адресу http://127.0.0.1:8765.
