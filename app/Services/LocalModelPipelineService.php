@@ -37,7 +37,7 @@ class LocalModelPipelineService
         ];
         $this->save($status);
         if ($readiness['ready']) {
-            RunLocalTrainingPipeline::dispatchAfterResponse($id, $this->branches->id());
+            RunLocalTrainingPipeline::dispatch($id, $this->branches->id());
         }
 
         return $status;

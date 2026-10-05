@@ -30,7 +30,7 @@ def resolve_runtime_model(path: str | os.PathLike[str] | None = None) -> tuple[s
         name = str(production.get("name", ""))
         if production.get("status") != "production" or name not in SUPPORTED_MODELS:
             raise ValueError("production model is not supported")
-        if name == "local-demand-router-v1" and load_active_policy()[0] is None:
+        if name == "local-demand-router-v1" and load_active_policy(registry_path)[0] is None:
             raise ValueError("production policy artifact is invalid")
         return name, None
     except (OSError, ValueError, TypeError, json.JSONDecodeError, StopIteration):

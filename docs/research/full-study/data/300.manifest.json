@@ -1,0 +1,24 @@
+{
+  "dataset": "UCI Online Retail II",
+  "source": "https://doi.org/10.24432/C5CG6D",
+  "seed": 42,
+  "series_count": 300,
+  "row_count": 221700,
+  "date_start": "2009-12-01",
+  "date_end": "2011-12-09",
+  "history_days": 739,
+  "horizon_days": 28,
+  "train_end": "2011-09-16",
+  "validation_end": "2011-11-11",
+  "test_end": "2011-12-09",
+  "files": {
+    "data": "300.csv.gz"
+  },
+  "preprocessing": {
+    "cohort_selection": "training-period active days and stable seeded hashes",
+    "selection_cutoff": "2011-09-16",
+    "excluded_pilot_series": "12",
+    "availability": "not recorded by UCI; sales are observed transactions, not uncensored latent demand",
+    "price_fill": "chronological forward-fill only; leading unknown prices set to zero"
+  }
+}

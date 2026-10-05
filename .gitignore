@@ -3,8 +3,11 @@
 !.env.example
 
 /vendor/
+/.tools/
 /.venv/
 /.venv-ml/
+__pycache__/
+*.py[cod]
 /data/raw/
 /data/processed/
 /storage/app/models/

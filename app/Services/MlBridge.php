@@ -17,7 +17,7 @@ class MlBridge
         return $this->run('simulate', [
             'product_id' => $productId,
             'branch_id' => $this->branches->id(),
-            'overrides' => $overrides,
+            'overrides' => (object) $overrides,
         ]);
     }
 

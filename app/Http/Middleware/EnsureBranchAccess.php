@@ -14,6 +14,12 @@ class EnsureBranchAccess
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
+        $explicitBranch = $request->headers->has('X-Branch-ID') || $request->query->has('branch_id');
+        if ($user && ! $user->is_admin && ! $explicitBranch) {
+            $branch = $user->branches()->where('branches.active', true)->orderBy('branches.id')->first();
+            abort_if($branch === null, 403, 'Нет доступных активных филиалов.');
+            $this->branches->set($branch);
+        }
         abort_unless($user && $user->canUseBranch($this->branches->id()), 403, 'Нет доступа к выбранному филиалу.');
         if (! in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)) {
             $role = $user->roleForBranch($this->branches->id());

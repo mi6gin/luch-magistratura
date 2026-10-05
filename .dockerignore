@@ -1,4 +1,5 @@
 vendor
+.tools
 .venv
 .venv-ml
 data/raw
@@ -7,6 +8,7 @@ data/processed
 .idea
 .env
 ml/__pycache__
+**/__pycache__
 storage/app/rayventory
 storage/app/reports
 storage/app/models

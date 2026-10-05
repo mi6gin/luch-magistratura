@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-05",
+  "scope": "IUP project and research, not academic paperwork",
+  "baseline_commit": "5c1c330a5492687aaafe0b94ae1e91d26174f1ae",
+  "python_unittest": {
+    "tests": 54,
+    "skipped": 0,
+    "passed": true
+  },
+  "syntax": {
+    "python_compileall": true,
+    "javascript_node_check": true,
+    "research_cli_help": true
+  },
+  "pint": {
+    "passed": true
+  },
+  "dependencies": {
+    "pip_check": true,
+    "composer_validate": true,
+    "composer_platform_requirements": true,
+    "composer_audit_vulnerabilities": 0
+  },
+  "phpunit_initial": {
+    "tests": 39,
+    "assertions": 242,
+    "passed": true,
+    "evidence": "local-validation.json"
+  },
+  "phpunit_latest": {
+    "tests": 39,
+    "assertions": 219,
+    "passed": false,
+    "errors": 3,
+    "environment_issue": "PHP is_readable returns false for existing files in the managed execution environment; actual file reads succeed. Reproduced with PHP 8.2.34 and 8.4.14.",
+    "affected_tests": [
+      "test_excel_import_replaces_only_selected_branch",
+      "test_inventory_preview_explains_period_sample_and_database_impact",
+      "test_purchase_export_contains_auditable_formulas"
+    ],
+    "bootstrap_issue": "Standard PHPUnit bootstrap also fails its is_readable check. Latest suite was run with --no-configuration and the same testing environment variables as phpunit.xml.",
+    "production_checks_bypassed": false
+  },
+  "github": {
+    "published": true,
+    "pull_request": "https://github.com/mi6gin/luch-magistratura/pull/7",
+    "ci_verified": true,
+    "validated_commit": "da5e8165204eda0aa7fed9400fc1c017ec44410b",
+    "ci_run": "https://github.com/mi6gin/luch-magistratura/actions/runs/37274640683",
+    "jobs_passed": 6
+  },
+  "docker": {
+    "locally_verified": false,
+    "blocker": "Docker engine unavailable; Windows Subsystem for Linux is not installed",
+    "ci_verified": true
+  },
+  "all_checks_passed": false,
+  "phpunit_ci": {
+    "tests": 39,
+    "assertions": 242,
+    "passed": true,
+    "environment": "GitHub Actions ubuntu-latest / PHP 8.2 / composer test"
+  },
+  "python_ci": {
+    "tests_per_os": 54,
+    "skipped": 0,
+    "passed": true,
+    "os": [
+      "ubuntu-latest",
+      "windows-latest"
+    ],
+    "published_study_verified_on_both": true
+  },
+  "release_checks_passed": true,
+  "all_checks_passed_note": "CI passed all six jobs. all_checks_passed remains false because the latest restricted local PHP run and local Docker execution were not successful; these limitations are not hidden."
+}

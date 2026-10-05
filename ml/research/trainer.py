@@ -24,11 +24,11 @@ class TrainingConfig:
     seed: int = 42
 
 
-def _loader(values, batch_size: int, shuffle: bool):
+def _loader(values, batch_size: int, shuffle: bool, seed: int = 42):
     torch, _ = require_torch()
     x, y, _ = values
     dataset = torch.utils.data.TensorDataset(torch.from_numpy(x), torch.from_numpy(y))
-    generator = torch.Generator().manual_seed(42)
+    generator = torch.Generator().manual_seed(seed)
     return torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, generator=generator)
 
 
@@ -50,8 +50,8 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model = build_model(name, train[0].shape[-1], config.history_days, config.horizon_days, config.hidden_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    train_loader = _loader(train, config.batch_size, True)
-    validation_loader = _loader(validation, config.batch_size, False)
+    train_loader = _loader(train, config.batch_size, True, config.seed)
+    validation_loader = _loader(validation, config.batch_size, False, config.seed)
     best_loss, best_state, stale_epochs = float("inf"), None, 0
     started = time.perf_counter()
     epochs = 0
@@ -85,7 +85,8 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
     model.load_state_dict(best_state or model.state_dict())
     output_dir.mkdir(parents=True, exist_ok=True)
     weights = output_dir / f"{name}.pt"
-    torch.save({"state_dict": model.state_dict(), "config": asdict(config), "feature_count": train[0].shape[-1]}, weights)
+    torch.save({"state_dict": model.state_dict(), "config": asdict(config), "feature_count": train[0].shape[-1],
+                "model": name, "quantile_parameterization": "softplus_increments_v2"}, weights)
     return {
         "model": name,
         "epochs": epochs,
@@ -102,12 +103,16 @@ def evaluate_model(name: str, checkpoint_path: Path, test, sales_scales: dict[st
     torch, _ = require_torch()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     config = TrainingConfig(**checkpoint["config"])
-    model = build_model(name, checkpoint["feature_count"], config.history_days, config.horizon_days, config.hidden_size)
+    model = build_model(name, checkpoint["feature_count"], config.history_days, config.horizon_days, config.hidden_size,
+                        checkpoint.get("quantile_parameterization", "sorted_clamped_v1"))
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     started = time.perf_counter()
     with torch.no_grad():
-        prediction = model(torch.from_numpy(test[0])).numpy()
+        prediction = np.concatenate([
+            model(torch.from_numpy(test[0][start:start + config.batch_size])).numpy()
+            for start in range(0, len(test[0]), config.batch_size)
+        ], axis=0)
     inference_ms = (time.perf_counter() - started) * 1000
     scales = np.asarray([sales_scales[series_id] for series_id in test[2]], dtype=float)[:, None]
     actual = test[1] * scales

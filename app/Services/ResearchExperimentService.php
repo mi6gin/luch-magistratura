@@ -19,6 +19,8 @@ class ResearchExperimentService
                 'dataset' => $document['dataset']['dataset'] ?? 'Неизвестный набор',
                 'series_count' => $document['dataset']['series_count'] ?? 0,
                 'rolling_folds' => $document['rolling_folds'] ?? 1,
+                'evaluation_split' => $document['evaluation_split'] ?? 'test',
+                'reserved_test_period' => $document['reserved_test_period'] ?? null,
                 'champion' => $document['champion'] ?? null,
                 'results' => $document['results'] ?? [],
             ];

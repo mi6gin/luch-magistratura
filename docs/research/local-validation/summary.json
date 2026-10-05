@@ -1,0 +1,173 @@
+{
+  "created_at": "2026-10-04T21:52:10+00:00",
+  "experiment_id": "EXP-20261004T214749Z-5F0EAF",
+  "dataset": "UCI Online Retail II",
+  "evaluation_split": "test",
+  "evaluation_note": "Метрики рассчитаны на test-окнах; гиперпараметры следует выбирать по отдельной validation-выборке.",
+  "data_preprocessing": {},
+  "rolling_folds": 3,
+  "overall_winner": "moving_median_28",
+  "best_neural": "transformer",
+  "ranking": [
+    {
+      "model": "moving_median_28",
+      "wape_pct": 93.9821,
+      "wape_std": 2.6781,
+      "training_seconds": 0.0,
+      "parameter_count": 0
+    },
+    {
+      "model": "adaptive_demand_router",
+      "wape_pct": 96.3063,
+      "wape_std": 4.3179,
+      "training_seconds": 0.0,
+      "parameter_count": 0
+    },
+    {
+      "model": "transformer",
+      "wape_pct": 99.6744,
+      "wape_std": 0.4777,
+      "training_seconds": 32.271,
+      "parameter_count": 79124
+    },
+    {
+      "model": "lstm",
+      "wape_pct": 100.1111,
+      "wape_std": 0.6225,
+      "training_seconds": 2.633,
+      "parameter_count": 25940
+    },
+    {
+      "model": "gru",
+      "wape_pct": 101.4077,
+      "wape_std": 0.0506,
+      "training_seconds": 4.577,
+      "parameter_count": 20820
+    },
+    {
+      "model": "croston_sba",
+      "wape_pct": 104.3149,
+      "wape_std": 2.3384,
+      "training_seconds": 0.0,
+      "parameter_count": 0
+    },
+    {
+      "model": "seasonal_naive_7",
+      "wape_pct": 121.9397,
+      "wape_std": 33.356,
+      "training_seconds": 0.0,
+      "parameter_count": 0
+    },
+    {
+      "model": "risk_calibrated_router",
+      "wape_pct": 129.7769,
+      "wape_std": 36.1359,
+      "training_seconds": 0.0,
+      "parameter_count": 0
+    }
+  ],
+  "scenario_recommendations": [
+    {
+      "scenario": "seasonality",
+      "recommended_neural": "transformer",
+      "overall_winner": "seasonal_naive_7"
+    },
+    {
+      "scenario": "trend",
+      "recommended_neural": "transformer",
+      "overall_winner": "croston_sba"
+    },
+    {
+      "scenario": "promotion",
+      "recommended_neural": "transformer",
+      "overall_winner": "croston_sba"
+    },
+    {
+      "scenario": "external_factors",
+      "recommended_neural": "transformer",
+      "overall_winner": "risk_calibrated_router"
+    }
+  ],
+  "scalability": [
+    {
+      "requested_series": 4,
+      "series": 4,
+      "rows": 2956,
+      "wall_seconds": 1.529,
+      "process_peak_memory_mb": 503.56,
+      "experiment_id": "EXP-20261004T215204Z-A1181A",
+      "models": [
+        {
+          "model": "lstm",
+          "wape_pct": 108.6618,
+          "training_seconds": 0.073,
+          "inference_ms": 0.681,
+          "parameter_count": 8916
+        },
+        {
+          "model": "gru",
+          "wape_pct": 110.2604,
+          "training_seconds": 0.164,
+          "inference_ms": 2.894,
+          "parameter_count": 7380
+        },
+        {
+          "model": "transformer",
+          "wape_pct": 113.4374,
+          "training_seconds": 1.108,
+          "inference_ms": 1.447,
+          "parameter_count": 23220
+        }
+      ]
+    },
+    {
+      "requested_series": 12,
+      "series": 12,
+      "rows": 8868,
+      "wall_seconds": 4.466,
+      "process_peak_memory_mb": 531.14,
+      "experiment_id": "EXP-20261004T215206Z-AE4309",
+      "models": [
+        {
+          "model": "lstm",
+          "wape_pct": 100.6301,
+          "training_seconds": 0.204,
+          "inference_ms": 1.352,
+          "parameter_count": 8916
+        },
+        {
+          "model": "gru",
+          "wape_pct": 98.6042,
+          "training_seconds": 0.454,
+          "inference_ms": 3.006,
+          "parameter_count": 7380
+        },
+        {
+          "model": "transformer",
+          "wape_pct": 101.9339,
+          "training_seconds": 3.418,
+          "inference_ms": 3.292,
+          "parameter_count": 23220
+        }
+      ]
+    }
+  ],
+  "memory_measurement": {
+    "metric": "process_peak_memory_mb",
+    "scope": "process_lifetime_high_water_mark",
+    "backend": "windows_peak_working_set",
+    "shared_process": true,
+    "independent_per_size": false,
+    "description": "Cumulative process peak includes prior sizes and model runs; not an isolated per-size peak.",
+    "unavailable_value": null
+  },
+  "recommendations": [
+    "Точность: на наборе «UCI Online Retail II» наименьший WAPE показала модель moving_median_28.",
+    "Лучшая нейросеть для этого набора — transformer с WAPE 99.67%.",
+    "Производительность: быстрее всех среди проверенных нейросетей на наборе «UCI Online Retail II» обучается lstm (2.633 с).",
+    "Сложность: минимальное число параметров среди проверенных нейросетей у gru (20820).",
+    "Масштабирование: на 12 рядах быстрее обучается lstm (0.204 с).",
+    "Гибкость: для сезонности, тренда, промо и внешних факторов выбирать архитектуру по сценарной таблице, а не назначать одну модель всем SKU."
+  ],
+  "conclusion": "Для набора «UCI Online Retail II» минимальную ошибку показала модель moving_median_28. Среди проверенных нейросетей — transformer. Выбор архитектуры следует выполнять по типу спроса, а не по сложности модели: итоговый кандидат обязан устойчиво превосходить baseline на нескольких временных окнах."
+}

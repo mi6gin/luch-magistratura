@@ -83,7 +83,7 @@ def _baseline_predictions(values) -> dict[str, np.ndarray]:
 def adaptive_baseline(validation, test, sales_scales: dict[str, float]) -> dict:
     validation_predictions = _baseline_predictions(validation)
     validation_labels = np.asarray([demand_type(history) for history in validation[0][..., 0]])
-    routes = {}
+    routes = {label: "moving_median_28" for label in ("smooth", "intermittent", "erratic", "lumpy")}
     for label in ("smooth", "intermittent", "erratic", "lumpy"):
         mask = validation_labels == label
         if not np.any(mask):
@@ -107,8 +107,8 @@ def risk_calibrated_baseline(validation, test, sales_scales: dict[str, float]) -
     test_predictions = _baseline_predictions(test)
     validation_labels = np.asarray([demand_type(history) for history in validation[0][..., 0]])
     test_labels = np.asarray([demand_type(history) for history in test[0][..., 0]])
-    prediction = np.zeros_like(test[1])
-    policies = {}
+    prediction = test_predictions["moving_median_28"].copy()
+    policies = {label: "moving_median_28 × 1" for label in ("smooth", "intermittent", "erratic", "lumpy")}
     multipliers = np.arange(0.5, 4.01, 0.25)
     for label in ("smooth", "intermittent", "erratic", "lumpy"):
         validation_mask = validation_labels == label
@@ -128,11 +128,32 @@ def risk_calibrated_baseline(validation, test, sales_scales: dict[str, float]) -
     return result
 
 
-def _fold_manifest(base: dict, fold_index: int, fold_count: int, step_days: int = 28) -> dict:
+def _fold_manifest(
+    base: dict, fold_index: int, fold_count: int, step_days: int = 28,
+    evaluation_split: str = "test",
+) -> dict:
+    has_boundaries = "train_end" in base and "validation_end" in base
+    if evaluation_split == "test" and has_boundaries:
+        # Longer custom test periods need at least their own length between
+        # origins, so earlier test folds never overlap the final reserved test.
+        test_days = (pd.Timestamp(base["test_end"]) - pd.Timestamp(base["validation_end"])).days
+        step_days = max(step_days, test_days)
     offset = (fold_count - fold_index - 1) * step_days
-    test_end = pd.Timestamp(base["test_end"]) - pd.Timedelta(days=offset)
-    validation_end = test_end - pd.Timedelta(days=28)
-    train_end = validation_end - pd.Timedelta(days=56)
+    if evaluation_split == "validation":
+        # Tuning folds end at the original validation boundary. The reserved
+        # test period must never become a validation window in later folds.
+        test_end = pd.Timestamp(base["test_end"])
+        validation_end = pd.Timestamp(base["validation_end"]) - pd.Timedelta(days=offset)
+        train_end = pd.Timestamp(base["train_end"]) - pd.Timedelta(days=offset)
+    else:
+        test_end = pd.Timestamp(base["test_end"]) - pd.Timedelta(days=offset)
+        if has_boundaries:
+            validation_end = pd.Timestamp(base["validation_end"]) - pd.Timedelta(days=offset)
+            train_end = pd.Timestamp(base["train_end"]) - pd.Timedelta(days=offset)
+        else:
+            # Compatibility for older callers that only supplied test_end.
+            validation_end = test_end - pd.Timedelta(days=28)
+            train_end = validation_end - pd.Timedelta(days=56)
     if train_end <= pd.Timestamp(base["date_start"]) + pd.Timedelta(days=120):
         raise ValueError("Для выбранного числа rolling-окон недостаточно истории.")
     return {
@@ -201,39 +222,64 @@ def run_experiment(
     models: list[str],
     config: TrainingConfig,
     folds: int = 1,
+    evaluation_split: str = "test",
 ) -> dict:
     if folds < 1 or folds > 6:
         raise ValueError("Количество rolling-окон должно быть от 1 до 6.")
+    if evaluation_split not in {"test", "validation"}:
+        raise ValueError("Период оценки должен быть test или validation.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     experiment_id = datetime.now(timezone.utc).strftime("EXP-%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:6].upper()
     output_dir = output_root / experiment_id
     fold_documents = []
     fold_results = []
     for fold_index in range(folds):
-        current_manifest = _fold_manifest(manifest, fold_index, folds)
-        _, scales, train, validation, test = load_experiment_data(str(data_path), current_manifest, config.history_days, config.horizon_days)
+        current_manifest = _fold_manifest(manifest, fold_index, folds, evaluation_split=evaluation_split)
+        _, scales, train, validation, test = load_experiment_data(
+            str(data_path), current_manifest, config.history_days, config.horizon_days,
+            include_test=evaluation_split == "test",
+        )
+        evaluation = test if evaluation_split == "test" else validation
+        calibration = validation if evaluation_split == "test" else train
+        evaluation_start = pd.Timestamp(current_manifest["validation_end" if evaluation_split == "test" else "train_end"]) + pd.Timedelta(days=1)
+        evaluation_end = current_manifest["test_end" if evaluation_split == "test" else "validation_end"]
         current_results = [
-            seasonal_baseline(test, scales.sales),
-            median_baseline(test, scales.sales),
-            croston_baseline(test, scales.sales),
-            adaptive_baseline(validation, test, scales.sales),
-            risk_calibrated_baseline(validation, test, scales.sales),
+            seasonal_baseline(evaluation, scales.sales),
+            median_baseline(evaluation, scales.sales),
+            croston_baseline(evaluation, scales.sales),
+            adaptive_baseline(calibration, evaluation, scales.sales),
+            risk_calibrated_baseline(calibration, evaluation, scales.sales),
         ]
         fold_dir = output_dir / f"fold-{fold_index + 1}"
         for name in models:
             print(f"fold {fold_index + 1}/{folds}: training {name}", file=sys.stderr, flush=True)
             training = train_model(name, train, validation, fold_dir, config)
-            metrics = evaluate_model(name, fold_dir / training["weights"], test, scales.sales)
+            metrics = evaluate_model(name, fold_dir / training["weights"], evaluation, scales.sales)
             current_results.append({**training, "metrics": metrics})
+        for result in current_results:
+            metrics = result["metrics"]
+            metrics["evaluation_split"] = evaluation_split
+            metrics["evaluation_windows"] = metrics.pop("test_windows")
+            if evaluation_split == "test":
+                metrics["test_windows"] = metrics["evaluation_windows"]
         fold_results.append(current_results)
         fold_documents.append({
             "fold": fold_index + 1,
             "train_end": current_manifest["train_end"],
             "validation_end": current_manifest["validation_end"],
             "test_end": current_manifest["test_end"],
+            "evaluation_split": evaluation_split,
+            "evaluation_start": evaluation_start.date().isoformat(),
+            "evaluation_end": evaluation_end,
             "results": current_results,
         })
     results = _aggregate(fold_results)
+    for result in results:
+        result["metrics"]["evaluation_split"] = evaluation_split
+        result["metrics"]["evaluation_windows"] = sum(
+            item["metrics"]["evaluation_windows"]
+            for fold in fold_results for item in fold if item["model"] == result["model"]
+        )
     ranked = sorted(results, key=lambda item: item["metrics"]["wape_pct"])
     pytorch_version = None
     if models:
@@ -252,6 +298,12 @@ def run_experiment(
         "results": results,
         "folds": fold_documents,
         "rolling_folds": folds,
+        "evaluation_split": evaluation_split,
+        "reserved_test_period": {
+            "start": (pd.Timestamp(manifest["validation_end"]) + pd.Timedelta(days=1)).date().isoformat(),
+            "end": manifest["test_end"],
+            "evaluated": evaluation_split == "test",
+        },
         "champion": ranked[0]["model"],
         "ranking": [item["model"] for item in ranked],
     }

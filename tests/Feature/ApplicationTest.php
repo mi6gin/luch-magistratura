@@ -310,7 +310,7 @@ class ApplicationTest extends TestCase
             ->assertJsonPath('ready', false)
             ->assertJsonPath('series_eligible', 0)
             ->assertJsonPath('minimum_series_span_days', 30)
-            ->assertJsonPath('minimum_days', 175);
+            ->assertJsonPath('minimum_days', 262);
         $this->postJson('/api/training-pipeline')->assertOk()
             ->assertJsonPath('pipeline.status', 'skipped');
         $this->getJson('/api/training-pipeline')->assertOk()

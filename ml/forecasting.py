@@ -6,6 +6,7 @@ import math
 import os
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -132,7 +133,7 @@ def load_inventory_data(
     warnings: list[str] = []
 
     branch_id = branch_id or int(os.getenv("ML_BRANCH_ID", "1"))
-    with sqlite3.connect(str(path), timeout=30) as connection:
+    with closing(sqlite3.connect(str(path), timeout=30)) as connection:
         table_names = {
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -231,7 +232,7 @@ def load_inventory_data(
     stock = stock.groupby("product_id", as_index=False, observed=True)["current_quantity"].last()
 
     if transit.empty or not {"product_id", "in_transit_quantity"}.issubset(transit.columns):
-        transit = pd.DataFrame({"product_id": products["id"], "in_transit_quantity": 0.0})
+        transit = pd.DataFrame(columns=["product_id", "in_transit_quantity", "expected_date"])
     else:
         transit = transit.copy()
         transit["product_id"] = pd.to_numeric(transit["product_id"], errors="coerce")
@@ -240,10 +241,15 @@ def load_inventory_data(
         ).fillna(0.0).clip(lower=0.0)
         transit = transit.dropna(subset=["product_id"])
         transit["product_id"] = transit["product_id"].astype(int)
-        transit = transit.groupby("product_id", as_index=False, observed=True)["in_transit_quantity"].sum()
+        date_column = "expected_date" if "expected_date" in transit else "arrival_date"
+        transit["expected_date"] = pd.to_datetime(
+            transit[date_column] if date_column in transit else pd.Series(pd.NaT, index=transit.index),
+            errors="coerce",
+        ).dt.normalize()
 
     inventory = products.merge(stock, how="left", left_on="id", right_on="product_id").drop(columns="product_id")
-    inventory = inventory.merge(transit, how="left", left_on="id", right_on="product_id").drop(columns="product_id")
+    transit_totals = transit.groupby("product_id", as_index=False, observed=True)["in_transit_quantity"].sum()
+    inventory = inventory.merge(transit_totals, how="left", left_on="id", right_on="product_id").drop(columns="product_id")
     inventory[["current_quantity", "in_transit_quantity"]] = inventory[
         ["current_quantity", "in_transit_quantity"]
     ].fillna(0.0).clip(lower=0.0)
@@ -510,6 +516,7 @@ def _project_dates(
     warnings.extend(price_warnings)
 
     day_levels = np.array([profile["dow_levels"][int(day)] for day in dates.dayofweek], dtype=float)
+    profile["policy_reference_level"] = float(np.mean(day_levels))
     progress = (np.arange(len(dates), dtype=float) + 1.0) / max(len(dates), 1)
     trend = 1.0 + (profile["trend_ratio"] - 1.0) * float(strategy["trend_strength"]) * progress
     event_multiplier = np.where(promo, profile["promo_uplift"], 1.0)
@@ -564,6 +571,30 @@ def _quality_warnings(quality: Mapping[str, Any]) -> list[str]:
     return warnings
 
 
+def _scheduled_receipts(
+    data: Mapping[str, Any], product_id: int, dates: pd.DatetimeIndex,
+) -> tuple[np.ndarray, list[str]]:
+    """Place confirmed transit on its expected day, never at forecast creation."""
+    receipts = np.zeros(len(dates), dtype=float)
+    transit = data.get("transit")
+    if transit is None or transit.empty:
+        return receipts, []
+    shipments = transit.loc[transit["product_id"] == product_id]
+    warnings: list[str] = []
+    for shipment in shipments.to_dict("records"):
+        quantity = max(_as_float(shipment.get("in_transit_quantity")), 0.0)
+        if not quantity:
+            continue
+        expected = pd.to_datetime(shipment.get("expected_date", shipment.get("arrival_date")), errors="coerce")
+        if pd.isna(expected) or expected.normalize() < pd.Timestamp.now().normalize():
+            warnings.append("Поставка без подтверждённой будущей даты не включена в доступный запас; уточните дату поступления.")
+            continue
+        index = int(dates.searchsorted(expected.normalize()))
+        if index < len(dates):
+            receipts[index] += quantity
+    return receipts, _dedupe_warnings(warnings)
+
+
 def forecast_product(
     product_id: int,
     inventory_data: Mapping[str, Any] | None = None,
@@ -596,7 +627,10 @@ def forecast_product(
     forecast_start = max(today, last_sale + pd.Timedelta(days=1))
     dates = pd.date_range(forecast_start, periods=horizon, freq="D")
     projection, profile, warnings = _project_dates(history, dates, strategy, overrides)
-    projection, runtime_model, policy_warning = apply_active_policy(history, projection)
+    projection, runtime_model, policy_warning = apply_active_policy(
+        history, projection, reference_level=profile.get("policy_reference_level"),
+        dates=dates, sanity_cap=profile.get("sanity_cap"),
+    )
     if policy_warning:
         warnings.append(policy_warning)
 
@@ -611,7 +645,13 @@ def forecast_product(
         warnings.append("Праздничный эффект принят нейтральным: недостаточно фактических наблюдений.")
 
     on_hand = max(_as_float(product["current_quantity"] if initial_stock is None else initial_stock), 0.0)
-    stock = np.maximum(on_hand - np.cumsum(projection["q50"]), 0.0)
+    receipts, receipt_warnings = _scheduled_receipts(data, normalized_id, dates)
+    warnings.extend(receipt_warnings)
+    stock = np.zeros(len(dates), dtype=float)
+    remaining = on_hand
+    for index, demand in enumerate(projection["q50"]):
+        remaining = max(remaining + receipts[index] - demand, 0.0)
+        stock[index] = remaining
     safety_stock = np.maximum(projection["q90"] - projection["q50"], 0.0)
     selected_quantile = STRATEGIES[strategy]["quantile"]
     quality = _quality_for_product(history, forecast_start) if not history.empty else {
@@ -636,6 +676,7 @@ def forecast_product(
         "q50": rounded["q50"],
         "q90": rounded["q90"],
         "stock": np.round(stock, 3).tolist(),
+        "receipts": np.round(receipts, 3).tolist(),
         "safety_stock": np.round(safety_stock, 3).tolist(),
         "selected_quantile": selected_quantile,
         "selected_demand": rounded[selected_quantile],
@@ -658,6 +699,7 @@ def evaluate_baseline(
     inventory_data: Mapping[str, Any] | None = None,
     *,
     holdout_days: int = 28,
+    use_active_policy: bool = False,
 ) -> dict[str, Any]:
     """Fast recent-date holdout evaluation across all SKUs."""
     if holdout_days < 7:
@@ -665,11 +707,13 @@ def evaluate_baseline(
     data = dict(inventory_data) if inventory_data is not None else load_inventory_data()
     sales = data["sales"].sort_values(["sale_date", "product_id"], kind="stable")
     unique_dates = np.sort(sales["sale_date"].unique())
+    if len(unique_dates) < 35:
+        raise ValueError("Not enough history to evaluate the model.")
     if len(unique_dates) < holdout_days + 28:
         holdout_days = max(7, min(holdout_days, len(unique_dates) // 3))
     holdout_dates = unique_dates[-holdout_days:]
     holdout_start = pd.Timestamp(holdout_dates[0])
-    train = sales.loc[sales["sale_date"] < holdout_start]
+    train = _recover_oos_demand(sales.loc[sales["sale_date"] < holdout_start])
     test = sales.loc[sales["sale_date"] >= holdout_start]
 
     actual_parts: list[np.ndarray] = []
@@ -678,29 +722,47 @@ def evaluate_baseline(
     q90_parts: list[np.ndarray] = []
     naive_parts: list[np.ndarray] = []
     evaluated_skus = 0
+    runtime_models: dict[str, int] = {}
+    evaluation_warnings: list[str] = []
     for product_id, test_group in test.groupby("product_id", sort=False, observed=True):
         history = train.loc[train["product_id"] == product_id]
         if len(history) < 28:
             continue
         test_group = test_group.sort_values("sale_date", kind="stable")
+        # Availability controls scoring, never the forecast horizon. Removing
+        # censored dates here would change trend progress and policy calibration
+        # even on retained dates, despite unchanged training history.
+        observed = test_group["in_stock"].to_numpy(dtype=bool)
+        if not observed.any():
+            continue
         dates = pd.DatetimeIndex(test_group["sale_date"])
-        projection, _, _ = _project_dates(
+        projection, profile, _ = _project_dates(
             history,
             dates,
             "standard",
             known_promo=test_group["is_promo"].to_numpy(dtype=bool),
             known_holiday=test_group["is_holiday"].to_numpy(dtype=bool),
         )
+        runtime_model = MODEL_NAME
+        if use_active_policy:
+            projection, runtime_model, policy_warning = apply_active_policy(
+                history, projection, reference_level=profile.get("policy_reference_level"),
+                dates=dates, sanity_cap=profile.get("sanity_cap"),
+            )
+            if policy_warning:
+                evaluation_warnings.append(policy_warning)
+        runtime_models[runtime_model] = runtime_models.get(runtime_model, 0) + 1
         dow_last = history.sort_values("sale_date").groupby(
             history["sale_date"].dt.dayofweek, observed=True
         )["recovered_demand"].last()
         fallback = _as_float(history["recovered_demand"].median(), 0.0)
         naive = np.asarray([_as_float(dow_last.get(int(day)), fallback) for day in dates.dayofweek])
-        actual_parts.append(test_group["recovered_demand"].to_numpy(dtype=float))
-        q10_parts.append(projection["q10"])
-        q50_parts.append(projection["q50"])
-        q90_parts.append(projection["q90"])
-        naive_parts.append(naive)
+        # Score observed sales only; imputed holdout demand is not ground truth.
+        actual_parts.append(test_group["quantity_sold"].to_numpy(dtype=float)[observed])
+        q10_parts.append(projection["q10"][observed])
+        q50_parts.append(projection["q50"][observed])
+        q90_parts.append(projection["q90"][observed])
+        naive_parts.append(naive[observed])
         evaluated_skus += 1
 
     if not actual_parts:
@@ -731,7 +793,10 @@ def evaluate_baseline(
         "holdout_end": pd.Timestamp(holdout_dates[-1]).date().isoformat(),
         "observations": int(actual.size),
         "sku_count": int(evaluated_skus),
-        "model": MODEL_NAME,
+        "model": next(iter(runtime_models)) if len(runtime_models) == 1 else "mixed-runtime",
+        "runtime_models": runtime_models,
+        "evaluation_target": "observed-in-stock-sales",
+        "warnings": _dedupe_warnings(evaluation_warnings),
         "comparison": {
             "baseline_model": "seasonal-naive-weekly",
             "baseline_wape_pct": naive_wape,
@@ -741,9 +806,17 @@ def evaluate_baseline(
     }
 
 
+def evaluate_active_model(
+    inventory_data: Mapping[str, Any] | None = None, *, holdout_days: int = 28,
+) -> dict[str, Any]:
+    """Evaluate the same production routing and scenario path used by forecasts."""
+    return evaluate_baseline(inventory_data, holdout_days=holdout_days, use_active_policy=True)
+
+
 def _stockout_date(forecast: Mapping[str, Any], available: float) -> str | None:
     cumulative = np.cumsum(np.asarray(forecast["q50"], dtype=float))
-    indices = np.flatnonzero(cumulative > available)
+    receipts = np.cumsum(np.asarray(forecast.get("receipts", np.zeros(len(cumulative))), dtype=float))
+    indices = np.flatnonzero(cumulative > available + receipts)
     return forecast["dates"][int(indices[0])] if indices.size else None
 
 
@@ -774,7 +847,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
     products = data["products"]
     evaluation_warning = None
     try:
-        metrics = evaluate_baseline(data)
+        metrics = evaluate_active_model(data)
     except ValueError as exc:
         metrics = {
             "wape": 0.0,
@@ -801,11 +874,14 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
     strategy = STRATEGIES[report_type]
     actions: list[dict[str, Any]] = []
     warnings = list(data.get("warnings", []))
+    warnings.extend(metrics.get("warnings", []))
+    runtime_models: dict[str, int] = {}
     if evaluation_warning:
         warnings.append(evaluation_warning)
 
     for product in products.itertuples(index=False):
         forecast = forecast_product(int(product.id), data, strategy=report_type)
+        runtime_models[forecast["model"]] = runtime_models.get(forecast["model"], 0) + 1
         warnings.extend(forecast["warnings"])
         lead_time = min(max(int(product.lead_time), 1), FORECAST_HORIZON)
         if int(product.lead_time) > FORECAST_HORIZON:
@@ -818,11 +894,12 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
         upper_lead_demand = float(np.sum(np.asarray(forecast["q90"], dtype=float)[:lead_time]))
         on_hand = max(_as_float(product.current_quantity), 0.0)
         in_transit = max(_as_float(product.in_transit_quantity), 0.0)
-        available = on_hand + in_transit
+        receipts = np.asarray(forecast["receipts"], dtype=float)
+        available = on_hand + float(receipts[:lead_time].sum())
         order_quantity = int(math.ceil(max(lead_demand - available, 0.0)))
         daily_median = max(float(np.mean(forecast["q50"])), 1e-9)
-        days_cover = available / daily_median
-        stockout = _stockout_date(forecast, available)
+        days_cover = on_hand / daily_median
+        stockout = _stockout_date(forecast, on_hand)
         best_order_date = None
         if stockout:
             best_order_date = (
@@ -842,6 +919,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
                 "lead_time_days": int(product.lead_time),
                 "on_hand": round(on_hand, 2),
                 "in_transit": round(in_transit, 2),
+                "in_transit_within_lead_time": round(float(receipts[:lead_time].sum()), 2),
                 "unit_price": round(_as_float(product.unit_price), 2),
                 "selected_quantile": selected_quantile,
                 "lead_time_demand": round(lead_demand, 2),
@@ -925,7 +1003,8 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
             "data_as_of": data["data_as_of"],
             "forecast_start": actions[0]["forecast"]["dates"][0] if actions else None,
             "forecast_end": actions[0]["forecast"]["dates"][-1] if actions else None,
-            "model": MODEL_NAME,
+            "model": next(iter(runtime_models)) if len(runtime_models) == 1 else "mixed-runtime" if runtime_models else MODEL_NAME,
+            "runtime_models": runtime_models,
             "horizon_days": FORECAST_HORIZON,
             "sku_count": len(actions),
             "category_count": len(category_summaries),
