@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-05",
+  "scope": "IUP project and research, not academic paperwork",
+  "baseline_commit": "5c1c330a5492687aaafe0b94ae1e91d26174f1ae",
+  "python_unittest": {"tests": 54, "skipped": 0, "passed": true},
+  "syntax": {"python_compileall": true, "javascript_node_check": true, "research_cli_help": true},
+  "pint": {"passed": true},
+  "dependencies": {"pip_check": true, "composer_validate": true, "composer_platform_requirements": true, "composer_audit_vulnerabilities": 0},
+  "phpunit_initial": {"tests": 39, "assertions": 242, "passed": true, "evidence": "local-validation.json"},
+  "phpunit_latest": {
+    "tests": 39,
+    "assertions": 219,
+    "passed": false,
+    "errors": 3,
+    "environment_issue": "PHP is_readable returns false for existing files in the managed execution environment; actual file reads succeed. Reproduced with PHP 8.2.34 and 8.4.14.",
+    "affected_tests": ["test_excel_import_replaces_only_selected_branch", "test_inventory_preview_explains_period_sample_and_database_impact", "test_purchase_export_contains_auditable_formulas"],
+    "bootstrap_issue": "Standard PHPUnit bootstrap also fails its is_readable check. Latest suite was run with --no-configuration and the same testing environment variables as phpunit.xml.",
+    "production_checks_bypassed": false
+  },
+  "github": {"published": false, "ci_verified": false, "blocker": "GitHub CLI authentication token for mi6gin is invalid"},
+  "docker": {"locally_verified": false, "blocker": "Docker engine unavailable; Windows Subsystem for Linux is not installed"},
+  "all_checks_passed": false
+}

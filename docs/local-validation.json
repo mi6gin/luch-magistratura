@@ -1,0 +1,212 @@
+{
+  "date": "2026-10-05",
+  "baseline_commit": "5c1c330a5492687aaafe0b94ae1e91d26174f1ae",
+  "local_branch": "fix/local-validation",
+  "environment": {
+    "os": "Windows 11",
+    "php": "8.2.34",
+    "python": "3.12.14",
+    "pytorch": "2.14.1+cpu"
+  },
+  "phpunit": {
+    "tests": 39,
+    "assertions": 242,
+    "passed": true
+  },
+  "python_unittest": {
+    "tests": 47,
+    "skipped": 0,
+    "passed": true
+  },
+  "pint": {
+    "passed": true
+  },
+  "syntax": {
+    "python_compileall": true,
+    "javascript_node_check": true,
+    "research_cli_help": true
+  },
+  "dependencies": {
+    "composer_validate": true,
+    "composer_platform_requirements": true,
+    "composer_audit_vulnerabilities": 0,
+    "python_pip_check": true
+  },
+  "http": {
+    "checks": [
+      {
+        "path": "/login",
+        "status": 200,
+        "bytes": 3069
+      },
+      {
+        "path": "/",
+        "status": 200,
+        "bytes": 12558
+      },
+      {
+        "path": "/inventory",
+        "status": 200,
+        "bytes": 10735
+      },
+      {
+        "path": "/simulator",
+        "status": 200,
+        "bytes": 9199
+      },
+      {
+        "path": "/purchases",
+        "status": 200,
+        "bytes": 10566
+      },
+      {
+        "path": "/model-health",
+        "status": 200,
+        "bytes": 7790
+      },
+      {
+        "path": "/experiments",
+        "status": 200,
+        "bytes": 14011
+      },
+      {
+        "path": "/reports",
+        "status": 200,
+        "bytes": 11058
+      },
+      {
+        "path": "/knowledge",
+        "status": 200,
+        "bytes": 7624
+      },
+      {
+        "path": "/settings",
+        "status": 200,
+        "bytes": 9607
+      },
+      {
+        "path": "/css/app.css",
+        "status": 200,
+        "bytes": 262
+      },
+      {
+        "path": "/js/app.js",
+        "status": 200,
+        "bytes": 92374
+      },
+      {
+        "path": "/api/branches",
+        "status": 200,
+        "bytes": 491
+      },
+      {
+        "path": "/api/dashboard-stats",
+        "status": 200,
+        "bytes": 470
+      },
+      {
+        "path": "/api/stock",
+        "status": 200,
+        "bytes": 4387
+      },
+      {
+        "path": "/api/purchase-plan",
+        "status": 200,
+        "bytes": 52072
+      },
+      {
+        "path": "/api/model-health",
+        "status": 200,
+        "bytes": 964
+      },
+      {
+        "path": "/api/training-readiness",
+        "status": 200,
+        "bytes": 803
+      },
+      {
+        "path": "/api/experiments",
+        "status": 200,
+        "bytes": 7770
+      },
+      {
+        "path": "/api/models",
+        "status": 200,
+        "bytes": 248
+      },
+      {
+        "path": "/api/simulate",
+        "status": 200,
+        "bytes": 2338
+      },
+      {
+        "path": "/api/generate-report",
+        "status": 200,
+        "bytes": 1696
+      },
+      {
+        "path": "/api/generate-report",
+        "status": 200,
+        "bytes": 1699
+      },
+      {
+        "path": "/download/inventory-template",
+        "status": 200,
+        "bytes": 100047
+      },
+      {
+        "path": "/api/purchase-plan/export",
+        "status": 200,
+        "bytes": 8575
+      }
+    ],
+    "passed": true
+  },
+  "report_downloads": [
+    {
+      "format": "pdf",
+      "status": 200,
+      "bytes": 258693,
+      "valid_container": true
+    },
+    {
+      "format": "pptx",
+      "status": 200,
+      "bytes": 213576,
+      "valid_container": true
+    }
+  ],
+  "browser": {
+    "checked_pages": [
+      "login",
+      "dashboard",
+      "inventory",
+      "experiments",
+      "settings",
+      "logout"
+    ],
+    "demo_branch_default_access": true,
+    "observed_javascript_errors": 0
+  },
+  "local_pipeline": {
+    "submission_http_status": 202,
+    "queue_worker_completed": true,
+    "pipeline": {
+      "id": "TRAIN-20261004T221245Z-3BF9A9",
+      "status": "blocked",
+      "trigger": "manual",
+      "created_at": "2026-10-05T03:12:45+05:00",
+      "updated_at": "2026-10-05T03:12:53+05:00",
+      "message": "Эксперимент завершён, но кандидат не прошёл проверки публикации.",
+      "experiment_id": "EXP-20261004T221251Z-30B867",
+      "candidate_id": "EXP-20261004T221251Z-30B867--risk_calibrated_router",
+      "branch_id": 1
+    },
+    "publication_block_reason": "risk_cost_pct 38.47 exceeds best baseline 36.25",
+    "interpretation": "Experiment completed; lower-quality candidate was correctly refused publication"
+  },
+  "not_run": [
+    "Docker image build",
+    "remote GitHub Actions"
+  ]
+}

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import resource
 import sys
 import time
 import uuid
@@ -16,7 +15,35 @@ from .experiment import run_experiment
 from .trainer import TrainingConfig
 
 
-def _peak_memory_mb() -> float:
+def _peak_memory_mb() -> float | None:
+    """Return the process lifetime high-water mark, not a per-trial peak."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + [
+                (name, ctypes.c_size_t) for name in (
+                    "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+                    "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
+                    "PagefileUsage", "PeakPagefileUsage",
+                )
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessMemoryCounters), wintypes.DWORD]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+            return None
+        return counters.PeakWorkingSetSize / (1024 * 1024)
+    try:
+        import resource
+    except ImportError:
+        return None
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return value / (1024 * 1024) if sys.platform == "darwin" else value / 1024
 
@@ -57,6 +84,7 @@ def benchmark_scalability(
             date_end=subset["date"].max().date().isoformat(),
             history_days=int(subset["date"].nunique()), horizon_days=config.horizon_days,
             files={"data": subset_path.name}, **bounds,
+            preprocessing=manifest.get("preprocessing", {}),
         )
         subset_manifest_path.write_text(json.dumps(asdict(subset_manifest), ensure_ascii=False, indent=2), encoding="utf-8")
         started = time.perf_counter()
@@ -68,7 +96,7 @@ def benchmark_scalability(
             "series": size,
             "rows": len(subset),
             "wall_seconds": round(time.perf_counter() - started, 3),
-            "process_peak_memory_mb": round(peak_memory_mb, 2),
+            "process_peak_memory_mb": round(peak_memory_mb, 2) if peak_memory_mb is not None else None,
             "experiment_id": experiment["experiment_id"],
             "models": [{
                 "model": item["model"],
@@ -85,6 +113,15 @@ def benchmark_scalability(
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": manifest["dataset"],
         "config": asdict(config),
+        "memory_measurement": {
+            "metric": "process_peak_memory_mb",
+            "scope": "process_lifetime_high_water_mark",
+            "backend": "windows_peak_working_set" if sys.platform == "win32" else "resource_ru_maxrss",
+            "shared_process": True,
+            "independent_per_size": False,
+            "description": "Cumulative process peak includes prior sizes and model runs; not an isolated per-size peak.",
+            "unavailable_value": None,
+        },
         "results": results,
     }
     (directory / "result.json").write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")

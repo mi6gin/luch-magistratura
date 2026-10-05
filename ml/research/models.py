@@ -15,8 +15,19 @@ def require_torch() -> tuple[Any, Any]:
     return torch, nn
 
 
-def build_model(name: str, feature_count: int, history_days: int = 90, horizon_days: int = 28, hidden_size: int = 64):
+def build_model(name: str, feature_count: int, history_days: int = 90, horizon_days: int = 28, hidden_size: int = 64,
+                quantile_parameterization: str = "softplus_increments_v2"):
     torch, nn = require_torch()
+    if quantile_parameterization not in {"sorted_clamped_v1", "softplus_increments_v2"}:
+        raise ValueError("Unsupported quantile parameterization")
+
+    def ordered_quantiles(raw):
+        values = raw.reshape(-1, horizon_days, len(QUANTILES))
+        if quantile_parameterization == "sorted_clamped_v1":
+            return torch.sort(values, dim=-1).values.clamp_min(0)
+        # Positive increments preserve order without zeroing the gradient of
+        # initially negative outputs. Old checkpoints retain their old rule.
+        return torch.cumsum(nn.functional.softplus(values), dim=-1)
 
     class RecurrentQuantileModel(nn.Module):
         def __init__(self, cell: str):
@@ -29,7 +40,7 @@ def build_model(name: str, feature_count: int, history_days: int = 90, horizon_d
         def forward(self, values):
             encoded, _ = self.encoder(values)
             raw = self.head(self.dropout(encoded[:, -1]))
-            return torch.sort(raw.reshape(-1, horizon_days, len(QUANTILES)), dim=-1).values.clamp_min(0)
+            return ordered_quantiles(raw)
 
     class TransformerQuantileModel(nn.Module):
         def __init__(self):
@@ -43,7 +54,7 @@ def build_model(name: str, feature_count: int, history_days: int = 90, horizon_d
         def forward(self, values):
             encoded = self.encoder(self.input_projection(values) + self.position[:, : values.shape[1]])
             raw = self.head(encoded.mean(dim=1))
-            return torch.sort(raw.reshape(-1, horizon_days, len(QUANTILES)), dim=-1).values.clamp_min(0)
+            return ordered_quantiles(raw)
 
     normalized = name.lower().strip()
     if normalized in {"lstm", "gru"}:

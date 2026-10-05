@@ -1,0 +1,127 @@
+{
+  "dataset": "UCI Online Retail II",
+  "source": "https://doi.org/10.24432/C5CG6D",
+  "generated_at": "2026-10-05T06:39:16.520540+00:00",
+  "period": {
+    "start": "2009-12-01",
+    "end": "2011-12-09",
+    "days": 739
+  },
+  "volume": {
+    "series": 100,
+    "rows": 73900
+  },
+  "quality": {
+    "duplicate_series_dates": 0,
+    "missing_sales": 0,
+    "negative_sales": 0,
+    "minimum_history_days": 739,
+    "median_history_days": 739.0
+  },
+  "demand": {
+    "zero_sales_pct": 73.58,
+    "mean": 6.7772,
+    "median": 0.0,
+    "p90": 12.0,
+    "p99": 102.0,
+    "types": {
+      "smooth": 0,
+      "intermittent": 4,
+      "erratic": 0,
+      "lumpy": 96
+    }
+  },
+  "patterns": {
+    "weekly_lag_correlation": 0.1145,
+    "portfolio_trend_30d_pct": 1.8,
+    "event_uplift": null,
+    "promo_uplift": null,
+    "price_demand_correlation": -0.0529
+  },
+  "performance": {
+    "input_mb": 0.347,
+    "analysis_seconds": 0.1502
+  },
+  "series_preview": [
+    {
+      "id": "21895",
+      "history_days": 739,
+      "active_days": 61,
+      "zero_sales_pct": 91.75,
+      "mean_demand": 0.6874,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "47589",
+      "history_days": 739,
+      "active_days": 61,
+      "zero_sales_pct": 91.75,
+      "mean_demand": 0.2327,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "85200",
+      "history_days": 739,
+      "active_days": 63,
+      "zero_sales_pct": 91.47,
+      "mean_demand": 1.2706,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "62096B",
+      "history_days": 739,
+      "active_days": 67,
+      "zero_sales_pct": 90.93,
+      "mean_demand": 0.3396,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "75013B",
+      "history_days": 739,
+      "active_days": 67,
+      "zero_sales_pct": 90.93,
+      "mean_demand": 0.5223,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "22289",
+      "history_days": 739,
+      "active_days": 68,
+      "zero_sales_pct": 90.8,
+      "mean_demand": 1.0014,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "21292",
+      "history_days": 739,
+      "active_days": 70,
+      "zero_sales_pct": 90.53,
+      "mean_demand": 2.4208,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "35599D",
+      "history_days": 739,
+      "active_days": 70,
+      "zero_sales_pct": 90.53,
+      "mean_demand": 0.3667,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "22702",
+      "history_days": 739,
+      "active_days": 75,
+      "zero_sales_pct": 89.85,
+      "mean_demand": 2.0744,
+      "demand_type": "lumpy"
+    },
+    {
+      "id": "22058",
+      "history_days": 739,
+      "active_days": 76,
+      "zero_sales_pct": 89.72,
+      "mean_demand": 0.682,
+      "demand_type": "lumpy"
+    }
+  ]
+}

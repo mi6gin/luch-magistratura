@@ -82,7 +82,7 @@ def run_simulate(product_id: Any, overrides: Mapping[str, Any] | None = None) ->
     if normalized_id not in set(data["products"]["id"].astype(int)):
         raise CliInputError(f"Unknown product_id: {normalized_id}")
     forecast = forecast_product(normalized_id, data, overrides=overrides, strategy="standard")
-    runtime_model, registry_warning = resolve_runtime_model()
+    _, registry_warning = resolve_runtime_model()
     return {
         "product_id": normalized_id,
         "product_name": forecast["product_name"],
@@ -91,9 +91,10 @@ def run_simulate(product_id: Any, overrides: Mapping[str, Any] | None = None) ->
         "q10": forecast["q10"],
         "q90": forecast["q90"],
         "stock": forecast["stock"],
+        "receipts": forecast["receipts"],
         "safety_stock": forecast["safety_stock"],
         "data_as_of": forecast["data_as_of"],
-        "model": runtime_model,
+        "model": forecast["model"],
         "quality": forecast["quality"],
         "warnings": list(dict.fromkeys([*forecast["warnings"], *([registry_warning] if registry_warning else [])])),
     }
@@ -109,8 +110,7 @@ def run_report(report_type: Any, formats: Any) -> dict[str, Any]:
         from report_generator import generate_report_bundle
 
     bundle = generate_report_bundle(report_type.strip().lower(), normalized_formats)
-    runtime_model, registry_warning = resolve_runtime_model()
-    bundle["metadata"]["model"] = runtime_model
+    _, registry_warning = resolve_runtime_model()
     public_artifacts = [
         {"format": artifact["format"], "filename": artifact["filename"]}
         for artifact in bundle["artifacts"]
@@ -130,14 +130,14 @@ def run_report(report_type: Any, formats: Any) -> dict[str, Any]:
 
 def run_planning() -> dict[str, Any]:
     document = build_report_document("standard")
-    runtime_model, registry_warning = resolve_runtime_model()
+    _, registry_warning = resolve_runtime_model()
     actions = []
     for item in document["product_actions"]:
         actions.append({key: value for key, value in item.items() if key != "forecast"})
     return {
         "success": True,
         "data_as_of": document["metadata"]["data_as_of"],
-        "model": runtime_model,
+        "model": document["metadata"]["model"],
         "portfolio": document["portfolio"],
         "quality": document["quality"],
         "evaluation": document["metrics"],

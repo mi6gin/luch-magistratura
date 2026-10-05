@@ -41,6 +41,8 @@ def tune_models(
     batch_size: int = 256,
     runner: Callable = run_experiment,
 ) -> dict:
+    if not models:
+        raise ValueError("Для подбора гиперпараметров укажите хотя бы одну модель.")
     tuning_id = datetime.now(timezone.utc).strftime("TUNE-%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:6].upper()
     trials = []
     for index, parameters in enumerate(trial_grid(models, preset), start=1):
@@ -53,7 +55,10 @@ def tune_models(
             batch_size=batch_size,
         )
         print(f"trial {index}: {parameters}", flush=True)
-        experiment = runner(data_path, manifest_path, experiments_root, [parameters["model"]], config, folds=folds)
+        experiment = runner(
+            data_path, manifest_path, experiments_root, [parameters["model"]], config,
+            folds=folds, evaluation_split="validation",
+        )
         result = next(item for item in experiment["results"] if item["model"] == parameters["model"])
         trials.append({
             "trial": index,
@@ -63,6 +68,10 @@ def tune_models(
             "metrics": result["metrics"],
             "training_seconds": result["training_seconds"],
             "parameter_count": result["parameter_count"],
+            "evaluation_split": "validation",
+            "evaluation_periods": [{
+                "start": fold["evaluation_start"], "end": fold["evaluation_end"],
+            } for fold in experiment.get("folds", [])],
         })
     ranking = sorted(trials, key=lambda item: (item["metrics"]["wape_pct"], item["training_seconds"], item["parameter_count"]))
     best_by_model = {
@@ -75,7 +84,10 @@ def tune_models(
         "preset": preset,
         "folds": folds,
         "epochs": epochs,
-        "selection_rule": "minimum WAPE; ties resolved by training time and parameter count",
+        "evaluation_split": "validation",
+        "selection_rule": "minimum validation WAPE; ties resolved by training time and parameter count",
+        "test_evaluated": False,
+        "final_test_rule": "Evaluate selected configurations once on the reserved test period with folds=1; earlier rolling test windows overlap tuning validation.",
         "trials": trials,
         "best_by_model": best_by_model,
         "winner": ranking[0],

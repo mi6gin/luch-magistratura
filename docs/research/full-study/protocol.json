@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "dataset": "UCI Online Retail II, UK positive non-cancelled transactions",
+  "source_sha256": "bcbe73b35f5b7babf197fb0cb983a11f5d9ff929078d4aa53d171b1f2df2e980",
+  "excluded_pilot_ids": [
+    "20751",
+    "21061",
+    "21112",
+    "21696",
+    "22346",
+    "22551",
+    "22946",
+    "22962",
+    "23247",
+    "23389",
+    "84598",
+    "85014A"
+  ],
+  "selection_cutoff": "2011-09-16",
+  "cohort": "training active-day quartiles, stable seeded hash; 300 pool, first 100 stratified IDs",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "models": [
+    "lstm",
+    "gru",
+    "transformer"
+  ],
+  "tuning": {
+    "trials": [
+      {
+        "model": "lstm",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "lstm",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      },
+      {
+        "model": "gru",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "gru",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "gru",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "gru",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      },
+      {
+        "model": "gru",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "gru",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "gru",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "gru",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 32,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 32,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 60
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 64,
+        "learning_rate": 0.001,
+        "history_days": 90
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 60
+      },
+      {
+        "model": "transformer",
+        "hidden_size": 64,
+        "learning_rate": 0.0003,
+        "history_days": 90
+      }
+    ],
+    "epochs": 20,
+    "patience": 4,
+    "seed": 42,
+    "selection": "minimum validation WAPE; tie by trial order"
+  },
+  "final": "one reserved 28-day test per architecture and prespecified seed; no retuning",
+  "scenarios": {
+    "names": [
+      "seasonality",
+      "trend",
+      "promotion",
+      "external_factors"
+    ],
+    "series": 12,
+    "days": 540,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "epochs": 20,
+    "config": "fixed hidden32/history90/lr0.001"
+  },
+  "scale": {
+    "sizes": [
+      10,
+      100,
+      300
+    ],
+    "seeds": [
+      42,
+      43
+    ],
+    "epochs": 3,
+    "config": "fixed hidden32/history90/lr0.001",
+    "fresh_process_per_job": true
+  },
+  "metrics": [
+    "WAPE",
+    "MAE",
+    "RMSE",
+    "Bias",
+    "risk_cost",
+    "coverage",
+    "segments"
+  ],
+  "resource_scope": "whole fresh worker process, two CPU threads; sequential jobs",
+  "limitations": [
+    "sales, not latent demand; availability unknown",
+    "single retailer",
+    "pilot excluded by SKU, shared dates; no fully external retailer test",
+    "synthetic scenarios use historical factors; no future promotion causal claim"
+  ]
+}

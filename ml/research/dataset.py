@@ -22,10 +22,19 @@ class SeriesScales:
 def normalize_from_train(frame: pd.DataFrame, train_end: str) -> tuple[pd.DataFrame, SeriesScales]:
     data = frame.copy()
     data["date"] = pd.to_datetime(data["date"])
+    data = data.sort_values(["id", "date"])
     train = data.loc[data["date"] <= pd.Timestamp(train_end)]
     if train.empty:
         raise ValueError("Train-период не содержит наблюдений.")
-    sales_scales = train.groupby("id", observed=True)["sales"].quantile(0.9).clip(lower=1).to_dict()
+    # Explicit stockouts measure constrained sales rather than true demand.
+    # Unknown availability is retained without inventing a stockout or demand.
+    demand_train = train
+    if "in_stock" in train:
+        demand_train = train.loc[~pd.to_numeric(train["in_stock"], errors="coerce").eq(0)]
+    sales_scales = (
+        demand_train.groupby("id", observed=True)["sales"].quantile(0.9)
+        .reindex(train["id"].unique()).fillna(1).clip(lower=1).to_dict()
+    )
     price_scales = train.groupby("id", observed=True)["sell_price"].median().clip(lower=0.01).to_dict()
     data["sales_scaled"] = data["sales"] / data["id"].map(sales_scales).fillna(1)
     data["price_scaled"] = data["sell_price"] / data["id"].map(price_scales).fillna(1)
@@ -71,11 +80,19 @@ def make_windows(
         group = group.sort_values("date").reset_index(drop=True)
         feature_values = group[list(FEATURES)].to_numpy(dtype=np.float32)
         target_values = group["sales_scaled"].to_numpy(dtype=np.float32)
+        censored = np.zeros(len(group), dtype=bool)
+        if "in_stock" in group:
+            censored = pd.to_numeric(group["in_stock"], errors="coerce").eq(0).to_numpy()
         dates = pd.to_datetime(group["date"])
         for position in range(history_days, len(group) - horizon_days + 1, stride):
             forecast_start = dates.iloc[position]
             forecast_end = dates.iloc[position + horizon_days - 1]
             if (start_date is not None and forecast_start < start_date) or forecast_end > end_date:
+                continue
+            # A stockout target cannot be treated as observed zero demand.
+            # Keep original sales as historical inputs, and mask only targets
+            # with explicit availability evidence; unknown days remain unknown.
+            if censored[position : position + horizon_days].any():
                 continue
             inputs.append(feature_values[position - history_days : position])
             targets.append(target_values[position : position + horizon_days])
@@ -85,12 +102,16 @@ def make_windows(
     return np.stack(inputs), np.stack(targets), series_ids
 
 
-def load_experiment_data(path: str, manifest: dict, history_days: int = 90, horizon_days: int = 28):
+def load_experiment_data(path: str, manifest: dict, history_days: int = 90, horizon_days: int = 28, include_test: bool = True):
     frame = pd.read_csv(path, parse_dates=["date"], dtype={"id": str}, low_memory=False)
+    if not include_test:
+        frame = frame.loc[frame["date"] <= pd.Timestamp(manifest["validation_end"])].copy()
     normalized, scales = normalize_from_train(frame, manifest["train_end"])
     train = make_windows(normalized, None, manifest["train_end"], history_days, horizon_days)
     validation_start = (pd.Timestamp(manifest["train_end"]) + pd.Timedelta(days=1)).date().isoformat()
     validation = make_windows(normalized, validation_start, manifest["validation_end"], history_days, horizon_days, stride=1)
-    test_start = (pd.Timestamp(manifest["validation_end"]) + pd.Timedelta(days=1)).date().isoformat()
-    test = make_windows(normalized, test_start, manifest["test_end"], history_days, horizon_days, stride=1)
+    test = None
+    if include_test:
+        test_start = (pd.Timestamp(manifest["validation_end"]) + pd.Timedelta(days=1)).date().isoformat()
+        test = make_windows(normalized, test_start, manifest["test_end"], history_days, horizon_days, stride=1)
     return frame, scales, train, validation, test

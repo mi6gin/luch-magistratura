@@ -17,6 +17,11 @@ from research.trainer import TrainingConfig
 
 
 def main() -> None:
+    # JSON is consumed as UTF-8 by the application and shell pipelines. Windows
+    # legacy console encodings cannot represent model names and route symbols.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Rayventory research dataset pipeline")
     subparsers = parser.add_subparsers(dest="action", required=True)
     prepare = subparsers.add_parser("prepare-m5", help="Build a deterministic research subset from official M5 files")

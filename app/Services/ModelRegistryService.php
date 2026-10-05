@@ -42,6 +42,9 @@ class ModelRegistryService
 
         $id = $experimentId.'--'.preg_replace('/[^a-z0-9_-]+/i', '-', $model);
         $folds = (int) ($experiment['rolling_folds'] ?? 1);
+        $testEvaluated = ($experiment['evaluation_split'] ?? 'test') === 'test'
+            && ($result['metrics']['evaluation_split'] ?? 'test') === 'test'
+            && ($experiment['reserved_test_period']['evaluated'] ?? true) === true;
         $localDataset = ($experiment['dataset']['dataset'] ?? null) === 'Local Rayventory inventory';
         $policyCompatible = in_array($model, ['adaptive_demand_router', 'risk_calibrated_router'], true)
             && $this->validRoutes($result['routes'] ?? []);
@@ -49,6 +52,7 @@ class ModelRegistryService
         $qualityGate = $this->qualityGate($model, $result, $experiment['results'] ?? []);
         $artifact = $runtimeCompatible ? $this->packagePolicy($id, $experimentId, $model, $result['routes']) : null;
         $checks = [
+            ['code' => 'test_evaluation', 'passed' => $testEvaluated, 'message' => $testEvaluated ? 'Кандидат оценён на тестовых окнах.' : 'Результаты подбора на validation нельзя публиковать без отдельной тестовой оценки.'],
             ['code' => 'rolling_folds', 'passed' => $folds >= 3, 'message' => "Rolling-окон: {$folds}; требуется минимум 3."],
             ['code' => 'finite_wape', 'passed' => is_numeric($result['metrics']['wape_pct'] ?? null) && is_finite((float) $result['metrics']['wape_pct']), 'message' => 'WAPE должен быть конечным числом.'],
             ['code' => 'beats_baseline', 'passed' => $qualityGate['passed'], 'message' => $qualityGate['message']],

@@ -5,6 +5,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from research.data import prepare_excel_inventory, prepare_local_inventory, prepare_m5, prepare_uci_online_retail, select_series, temporal_boundaries
 from research.analysis import analyze_dataset
-from research.dataset import FEATURES, normalize_from_train
+from research.dataset import FEATURES, load_experiment_data, make_windows, normalize_from_train
 from research.metrics import demand_type, interval_coverage, point_metrics, quantiles_are_ordered
 from research.experiment import _aggregate, _croston_sba, _fold_manifest, adaptive_baseline, risk_calibrated_baseline, seasonal_baseline
 
@@ -134,7 +135,9 @@ class ResearchPipelineTest(unittest.TestCase):
                     "store_id": "store_1",
                     "state_id": "CA",
                 }
-                row.update({f"d_{day}": item + day % 7 for day in range(1, days + 1)})
+                # Input column order is deliberately reversed: price fills must
+                # follow dates, not raw CSV column order.
+                row.update({f"d_{day}": item + day % 7 for day in range(days, 0, -1)})
                 sales_rows.append(row)
             pd.DataFrame(sales_rows).to_csv(raw / "sales_train_evaluation.csv", index=False)
             calendar = pd.DataFrame({
@@ -152,9 +155,10 @@ class ResearchPipelineTest(unittest.TestCase):
             })
             calendar.to_csv(raw / "calendar.csv", index=False)
             prices = [
-                {"store_id": "store_1", "item_id": f"item_{item}", "wm_yr_wk": week, "sell_price": 10 + item}
+                {"store_id": "store_1", "item_id": f"item_{item}", "wm_yr_wk": week, "sell_price": 10 + item + week}
                 for item in range(4)
                 for week in range(1, 29)
+                if week not in (1, 5)
             ]
             pd.DataFrame(prices).to_csv(raw / "sell_prices.csv", index=False)
 
@@ -164,6 +168,13 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(saved["seed"], 42)
             self.assertEqual(saved["row_count"], 570)
             self.assertTrue((output / "m5_subset.csv.gz").is_file())
+            prepared = pd.read_csv(output / "m5_subset.csv.gz", parse_dates=["date"])
+            for _, group in prepared.groupby("id"):
+                values = group.sort_values("date")["sell_price"].to_numpy()
+                np.testing.assert_array_equal(values[:7], np.zeros(7))
+                self.assertGreater(values[7], 0)
+                self.assertEqual(values[28], values[27])
+            self.assertIn("zero_before_first_known_price", saved["preprocessing"]["missing_price"])
 
     def test_prepare_uci_cleans_transactions_and_creates_daily_series(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -202,14 +213,15 @@ class ResearchPipelineTest(unittest.TestCase):
     def test_prepare_local_inventory_reads_sqlite_without_mutating_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            database = root / "inventory.db"
-            with sqlite3.connect(database) as connection:
+            database = root / "inventory #данные.db"
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, name TEXT, category TEXT, unit_price REAL)")
                 connection.execute("CREATE TABLE sales_history (product_id INTEGER, sale_date TEXT, quantity_sold INTEGER, in_stock INTEGER, is_holiday INTEGER, is_promo INTEGER)")
                 connection.execute("INSERT INTO products VALUES (1, 'SKU-1', 'Товар', 'Тест', 100)")
                 connection.executemany(
-                    "INSERT INTO sales_history VALUES (1, ?, ?, 1, 0, 0)",
-                    [(date.date().isoformat(), index % 5) for index, date in enumerate(pd.date_range("2024-01-01", periods=200))],
+                    "INSERT INTO sales_history VALUES (1, ?, ?, ?, 0, 0)",
+                    [(date.date().isoformat(), index % 5, 0 if index == 105 else 1)
+                     for index, date in enumerate(pd.date_range("2024-01-01", periods=200)) if index != 30],
                 )
             before = database.read_bytes()
             manifest = prepare_local_inventory(database, root / "output")
@@ -218,6 +230,13 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(manifest.history_days, 200)
             self.assertEqual(len(prepared), 200)
             self.assertEqual(database.read_bytes(), before)
+            self.assertTrue(pd.isna(prepared.loc[30, "in_stock"]))
+            self.assertEqual(prepared.loc[30, "sales"], 0)
+            self.assertEqual(prepared.loc[105, "in_stock"], 0)
+            self.assertEqual(prepared["in_stock"].eq(0).sum(), 1)
+            self.assertIn("explicit_stockouts", manifest.preprocessing["target_censoring"])
+            # Neither the fixture nor the read-only importer may retain a handle.
+            database.unlink()
             analysis = analyze_dataset(root / "output/local_inventory.csv.gz", root / "output/manifest.json")
             self.assertEqual(analysis["volume"]["series"], 1)
             self.assertEqual(analysis["period"]["days"], 200)
@@ -228,7 +247,7 @@ class ResearchPipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             database = root / "branches.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, sku TEXT, name TEXT, category TEXT, unit_price REAL)")
                 connection.execute("CREATE TABLE sales_history (branch_id INTEGER, product_id INTEGER, sale_date TEXT, quantity_sold INTEGER, in_stock INTEGER, is_holiday INTEGER, is_promo INTEGER)")
                 connection.execute("INSERT INTO products VALUES (1, 'SHARED', 'Общий товар', 'Тест', 100)")
@@ -262,6 +281,65 @@ class ResearchPipelineTest(unittest.TestCase):
             self.assertEqual(manifest.series_count, 2)
             self.assertEqual(manifest.row_count, 360)
             self.assertEqual(prepared["snap"].max(), 1)
+            self.assertTrue(prepared["in_stock"].isna().all())
+
+            # Availability is optional for existing workbooks, but preserved
+            # and aggregated conservatively when the official column exists.
+            sales["Был в наличии"] = 1
+            sales.loc[0, "Был в наличии"] = 0
+            sales = pd.concat([sales, sales.iloc[[0]].assign(**{"Был в наличии": 1})], ignore_index=True)
+            with pd.ExcelWriter(source, engine="openpyxl") as writer:
+                products.to_excel(writer, sheet_name="Товары", index=False)
+                sales.to_excel(writer, sheet_name="Продажи", index=False)
+            prepare_excel_inventory(source, root / "with-availability")
+            available = pd.read_csv(root / "with-availability/excel_inventory.csv.gz")
+            self.assertEqual(available.loc[0, "in_stock"], 0)
+            self.assertEqual(available["in_stock"].eq(0).sum(), 1)
+
+    def test_stockout_targets_are_masked_without_imputing_unknown_availability(self):
+        dates = pd.date_range("2024-01-01", periods=7)
+        frame = pd.DataFrame({
+            "id": ["sku"] * 7, "date": dates, "sales": np.arange(1, 8),
+            "sell_price": [1] * 7, "wday": dates.dayofweek + 1, "month": dates.month,
+            "is_event": [0] * 7, "snap": [0] * 7,
+            "in_stock": [1, 1, np.nan, 1, 0, 1, 1],
+        })
+        normalized, scales = normalize_from_train(frame, "2024-01-07")
+        inputs, targets, ids = make_windows(normalized, None, "2024-01-07", history_days=2, horizon_days=2, stride=1)
+        self.assertEqual(inputs.shape[0], 2)
+        np.testing.assert_allclose(targets * scales.sales["sku"], [[3, 4], [6, 7]])
+        self.assertEqual(ids, ["sku", "sku"])
+        # Later windows can still use actual censored sales as history; no
+        # future demand estimate has been substituted into the input.
+        self.assertAlmostEqual(inputs[-1, -1, 0] * scales.sales["sku"], 5)
+
+    def test_stockouts_do_not_distort_training_demand_scale(self):
+        dates = pd.date_range("2024-01-01", periods=12)
+        frame = pd.DataFrame({
+            "id": ["sku"] * 12, "date": dates, "sales": [0] * 9 + [10, 1000, 2000],
+            "sell_price": [1] * 12, "wday": dates.dayofweek + 1, "month": dates.month,
+            "is_event": [0] * 12, "snap": [0] * 12, "in_stock": [0] * 9 + [1] * 3,
+        })
+        _, scales = normalize_from_train(frame, "2024-01-10")
+        self.assertEqual(scales.sales["sku"], 10)
+
+    def test_validation_loader_never_builds_test_windows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dates = pd.date_range("2024-01-01", periods=40)
+            frame = pd.DataFrame({
+                "id": ["sku"] * 40, "date": dates, "sales": [2] * 30 + [99999] * 10,
+                "sell_price": [1] * 40, "wday": dates.dayofweek + 1, "month": dates.month,
+                "is_event": [0] * 40, "snap": [0] * 40,
+            })
+            path = Path(temporary) / "series.csv"
+            frame.to_csv(path, index=False)
+            manifest = {"train_end": "2024-01-20", "validation_end": "2024-01-30"}
+            loaded, scales, train, validation, test = load_experiment_data(str(path), manifest, history_days=7, horizon_days=3, include_test=False)
+            self.assertEqual(len(loaded), 30)
+            self.assertIsNone(test)
+            self.assertEqual(scales.sales["sku"], 2)
+            self.assertTrue(np.all(validation[1] == 1))
+            self.assertGreater(train[0].shape[0], 0)
 
 
 if __name__ == "__main__":

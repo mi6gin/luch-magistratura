@@ -1,0 +1,10 @@
+# Keep PHP formatting consistent between Windows checkouts and Linux CI.
+*.php text eol=lf
+*.py text eol=lf
+.gitattributes text eol=lf
+*.csv text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.svg text eol=lf
+*.yml text eol=lf
+*.pt binary

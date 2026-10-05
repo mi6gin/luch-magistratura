@@ -657,11 +657,12 @@
     let researchExperiments = [];
     function renderExperiment(experiment) {
         if (!experiment) return;
+        const isValidation = experiment.evaluation_split === 'validation';
         document.querySelector('#experiment-dataset').textContent = experiment.dataset || '—';
         document.querySelector('#experiment-series').textContent = `${Number(experiment.series_count || 0).toLocaleString('ru-RU')} временных рядов`;
         document.querySelector('#experiment-folds').textContent = experiment.rolling_folds || 1;
         document.querySelector('#experiment-champion').textContent = experiment.champion || '—';
-        document.querySelector('#experiment-meta').textContent = `${experiment.experiment_id} · ${new Date(experiment.created_at).toLocaleString('ru-RU')}`;
+        document.querySelector('#experiment-meta').textContent = `${experiment.experiment_id} · ${new Date(experiment.created_at).toLocaleString('ru-RU')} · ${isValidation ? 'валидация для подбора' : 'тестовая оценка'}`;
         const results = [...(experiment.results || [])].sort((a, b) => Number(a.metrics?.wape_pct) - Number(b.metrics?.wape_pct));
         document.querySelector('#experiment-results').innerHTML = results.map((item, index) => {
             const metrics = item.metrics || {};
@@ -674,9 +675,11 @@
             return `<td>${segment ? `${Number(segment.wape_pct).toLocaleString('ru-RU')}% <span class="table-subline">${route ? `метод: ${escapeHtml(route)}` : `${Number(segment.windows || 0).toLocaleString('ru-RU')} окон`}</span>` : 'н/д'}</td>`;
         }).join('')}</tr>`).join('') || '<tr><td colspan="5">Сегментные метрики появятся после нового rolling-запуска.</td></tr>';
         const leader = results[0];
-        document.querySelector('#experiment-note').textContent = Number(experiment.rolling_folds || 1) > 1
+        document.querySelector('#experiment-note').textContent = isValidation
+            ? 'Это оценка для подбора параметров. Тестовый период не использовался; публикация требует отдельной тестовой проверки.'
+            : Number(experiment.rolling_folds || 1) > 1
             ? `Рейтинг рассчитан по среднему WAPE на ${experiment.rolling_folds} последовательных окнах. Разброс показывает устойчивость результата.`
-            : `${leader?.model || 'Модель'} лидирует только на одном тестовом окне. Для научного вывода запустите rolling backtesting минимум на трёх окнах.`;
+            : `${leader?.model || 'Модель'} оценена на одном тестовом окне. После подбора параметров это отдельная финальная проверка; устойчивость исследуйте на дополнительных независимых периодах.`;
     }
 
     async function loadExperiments() {
@@ -747,7 +750,7 @@
         const data = await api('tuning');
         const tuning = data.tuning;
         if (!tuning) return;
-        document.querySelector('#tuning-meta').textContent = `${tuning.tuning_id} · ${tuning.trials.length} конфигураций · ${tuning.folds} rolling-окон`;
+        document.querySelector('#tuning-meta').textContent = `${tuning.tuning_id} · ${tuning.trials.length} конфигураций · ${tuning.folds} rolling-окон · ${tuning.evaluation_split === 'validation' ? 'WAPE на валидации' : 'старый запуск: повторите подбор по валидации'}`;
         const best = Object.values(tuning.best_by_model || {}).sort((a, b) => a.metrics.wape_pct - b.metrics.wape_pct);
         document.querySelector('#tuning-results').innerHTML = best.map((item, index) => `<tr class="${index === 0 ? 'experiment-winner' : ''}"><td><b>${escapeHtml(item.model)}</b>${index === 0 ? '<span class="table-subline">лучший вариант</span>' : ''}</td><td>${Number(item.metrics.wape_pct).toLocaleString('ru-RU')}%</td><td>${item.parameters.hidden_size}</td><td>${item.parameters.history_days} дней</td><td>${item.parameters.learning_rate}</td><td>${Number(item.training_seconds).toLocaleString('ru-RU')} сек.</td><td>${Number(item.parameter_count).toLocaleString('ru-RU')}</td></tr>`).join('');
     }
@@ -774,10 +777,10 @@
         const report = data.report;
         if (!report) return;
         document.querySelector('#research-report-meta').textContent = `${report.dataset} · ${report.rolling_folds} rolling-окна`;
-        document.querySelector('#research-best-neural').textContent = `ЛУЧШАЯ НС · ${String(report.best_neural).toUpperCase()}`;
+        document.querySelector('#research-best-neural').textContent = report.best_neural ? `ЛУЧШАЯ НС · ${String(report.best_neural).toUpperCase()}` : 'НЕЙРОСЕТИ НЕ ОЦЕНИВАЛИСЬ';
         document.querySelector('#research-verdict').textContent = report.conclusion;
         document.querySelector('#research-recommendations').innerHTML = (report.recommendations || []).map((item, index) => `<article><b>${String(index + 1).padStart(2, '0')}</b> ${escapeHtml(item)}</article>`).join('');
-        document.querySelector('#research-scale-results').innerHTML = (report.scalability || []).map(item => `<tr><td><b>${Number(item.series).toLocaleString('ru-RU')} рядов</b></td><td>${Number(item.rows).toLocaleString('ru-RU')}</td><td>${Number(item.wall_seconds).toLocaleString('ru-RU')} сек.</td><td>${Number(item.process_peak_memory_mb).toLocaleString('ru-RU')} МБ</td></tr>`).join('') || '<tr><td colspan="4">Нет результатов масштабирования.</td></tr>';
+        document.querySelector('#research-scale-results').innerHTML = (report.scalability || []).map(item => `<tr><td><b>${Number(item.series).toLocaleString('ru-RU')} рядов</b></td><td>${Number(item.rows).toLocaleString('ru-RU')}</td><td>${Number(item.wall_seconds).toLocaleString('ru-RU')} сек.</td><td>${item.process_peak_memory_mb == null ? 'н/д' : `${Number(item.process_peak_memory_mb).toLocaleString('ru-RU')} МБ`}</td></tr>`).join('') || '<tr><td colspan="4">Нет результатов масштабирования.</td></tr>';
     }
 
     async function startLocalTraining(button) {

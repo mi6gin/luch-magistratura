@@ -5,7 +5,8 @@ import json
 import os
 import random
 import sqlite3
-from dataclasses import asdict, dataclass
+from contextlib import closing
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ class DatasetManifest:
     validation_end: str
     test_end: str
     files: dict[str, str]
+    preprocessing: dict[str, str] = field(default_factory=dict)
 
 
 def set_seed(seed: int = SEED) -> None:
@@ -103,7 +105,10 @@ def prepare_m5(raw_dir: Path, output_dir: Path, series_limit: int = 300, seed: i
         [long["snap_CA"], long["snap_TX"], long["snap_WI"]],
         default=0,
     ).astype("int8")
-    long["sell_price"] = long.groupby("id", observed=True)["sell_price"].transform(lambda values: values.ffill().bfill()).fillna(0)
+    # Fill only from prices available on or before each date; an item may not
+    # have been on sale before its first recorded price.
+    long = long.sort_values(["id", "date"])
+    long["sell_price"] = long.groupby("id", observed=True)["sell_price"].ffill().fillna(0)
     output = long[["date", "id", "item_id", "dept_id", "cat_id", "store_id", "state_id", "sales", "sell_price", "wday", "month", "year", "is_event", "snap"]].sort_values(["id", "date"])
     bounds = temporal_boundaries(output["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,12 +128,15 @@ def prepare_m5(raw_dir: Path, output_dir: Path, series_limit: int = 300, seed: i
         validation_end=bounds["validation_end"],
         test_end=bounds["test_end"],
         files={"data": data_path.name},
+        preprocessing={"missing_price": "past_price_forward_fill; zero_before_first_known_price"},
     )
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 
 
-def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int = 300, seed: int = SEED) -> DatasetManifest:
+def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int = 300, seed: int = SEED,
+                             selection_cutoff: str | None = None,
+                             exclude_series: set[str] | None = None) -> DatasetManifest:
     if not source.is_file():
         raise FileNotFoundError(f"Файл UCI Online Retail II не найден: {source}")
     sheets = pd.read_excel(source, sheet_name=None)
@@ -158,10 +166,17 @@ def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int 
         sales=("Quantity", "sum"), revenue=("revenue", "sum"), description=("Description", "first")
     ).reset_index()
     daily["sell_price"] = daily["revenue"] / daily["sales"]
-    profile = daily.groupby("StockCode", observed=True).agg(
+    all_dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
+    global_bounds = temporal_boundaries(pd.Series(all_dates))
+    if selection_cutoff and pd.Timestamp(selection_cutoff) > pd.Timestamp(global_bounds["train_end"]):
+        raise ValueError("Selection cutoff must not extend beyond the training period.")
+    profile_data = daily.loc[daily["date"] <= pd.Timestamp(selection_cutoff)] if selection_cutoff else daily
+    profile = profile_data.groupby("StockCode", observed=True).agg(
         active_days=("date", "nunique"), total_sales=("sales", "sum"), description=("description", "first")
     ).reset_index()
     eligible = profile.loc[profile["active_days"] >= 60].copy()
+    if exclude_series:
+        eligible = eligible.loc[~eligible["StockCode"].isin(exclude_series)].copy()
     if eligible.empty:
         raise ValueError("Недостаточно товаров минимум с 60 активными днями продаж.")
     eligible["dept_id"] = pd.qcut(eligible["active_days"].rank(method="first"), 4, labels=["sporadic", "slow", "regular", "frequent"])
@@ -169,7 +184,7 @@ def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int 
     eligible = eligible.rename(columns={"StockCode": "id"})
     selected = select_series(eligible[["id", "dept_id", "store_id"]], min(series_limit, len(eligible)), seed)
     chosen = daily.loc[daily["StockCode"].isin(selected["id"])].rename(columns={"StockCode": "id"})
-    dates = pd.date_range(chosen["date"].min(), chosen["date"].max(), freq="D")
+    dates = all_dates if selection_cutoff else pd.date_range(chosen["date"].min(), chosen["date"].max(), freq="D")
     grid = pd.MultiIndex.from_product([selected["id"], dates], names=["id", "date"]).to_frame(index=False)
     output = grid.merge(chosen[["id", "date", "sales", "sell_price", "description"]], on=["id", "date"], how="left")
     output["sales"] = output["sales"].fillna(0).astype(float)
@@ -198,9 +213,32 @@ def prepare_uci_online_retail(source: Path, output_dir: Path, series_limit: int 
         validation_end=bounds["validation_end"],
         test_end=bounds["test_end"],
         files={"data": data_path.name},
+        preprocessing={
+            "cohort_selection": "training-period active days and stable seeded hashes" if selection_cutoff else "full-period active days and stable seeded hashes",
+            "selection_cutoff": selection_cutoff or "not specified",
+            "excluded_pilot_series": str(len(exclude_series or set())),
+            "availability": "not recorded by UCI; sales are observed transactions, not uncensored latent demand",
+            "price_fill": "chronological forward-fill only; leading unknown prices set to zero",
+        },
     )
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
+
+
+def _daily_availability(values: pd.Series) -> float:
+    """A recorded stockout censors a day; absent/invalid availability stays unknown."""
+    if values.eq(0).any():
+        return 0.0
+    return 1.0 if values.notna().all() and values.eq(1).all() else float("nan")
+
+
+def _availability_policy() -> dict[str, str]:
+    return {
+        "availability": "in_stock: 0=stockout, 1=available, missing=unknown",
+        "missing_sales_day": "zero_sales_with_unknown_availability",
+        "target_censoring": "exclude_forecast_windows_containing_explicit_stockouts",
+        "history": "observed_sales_only; no_hidden_demand_imputation",
+    }
 
 
 def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int = 1000, seed: int = SEED, branch_id: int | None = None) -> DatasetManifest:
@@ -208,7 +246,9 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
     if not database.is_file():
         raise FileNotFoundError(f"Локальная SQLite-база не найдена: {database}")
     branch_id = branch_id or int(os.getenv("ML_BRANCH_ID", "1"))
-    with sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True) as connection:
+    # sqlite3's context manager controls transactions but does not close the
+    # connection. Explicit closure also releases the database handle on Windows.
+    with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not {"products", "sales_history"}.issubset(tables):
             raise ValueError("В базе необходимы таблицы products и sales_history.")
@@ -230,6 +270,8 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
         raise ValueError("Для локального обучения нужны товары и история продаж.")
     sales["date"] = pd.to_datetime(sales["sale_date"], errors="coerce").dt.normalize()
     sales["sales"] = pd.to_numeric(sales["quantity_sold"], errors="coerce").fillna(0).clip(lower=0)
+    availability = pd.to_numeric(sales["in_stock"], errors="coerce")
+    sales["in_stock"] = availability.where(availability.isin([0, 1]))
     sales = sales.dropna(subset=["date"])
     known = set(pd.to_numeric(products["id"], errors="coerce").dropna().astype(int))
     sales = sales.loc[pd.to_numeric(sales["product_id"], errors="coerce").isin(known)].copy()
@@ -247,6 +289,7 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
         sales=("sales", "sum"),
         is_event=("is_holiday", "max"),
         snap=("is_promo", "max"),
+        in_stock=("in_stock", _daily_availability),
     ).reset_index()
     dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
     grid = pd.MultiIndex.from_product([selected_product_ids, dates], names=["product_id", "date"]).to_frame(index=False)
@@ -259,7 +302,7 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
     output["wday"] = output["date"].dt.dayofweek + 1
     output["month"] = output["date"].dt.month
     output["year"] = output["date"].dt.year
-    output = output[["date", "id", "sku", "name", "category", "sales", "sell_price", "wday", "month", "year", "is_event", "snap"]].sort_values(["id", "date"])
+    output = output[["date", "id", "sku", "name", "category", "sales", "sell_price", "wday", "month", "year", "is_event", "snap", "in_stock"]].sort_values(["id", "date"])
     bounds = temporal_boundaries(output["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
     data_path = output_dir / "local_inventory.csv.gz"
@@ -279,6 +322,7 @@ def prepare_local_inventory(database: Path, output_dir: Path, series_limit: int 
         validation_end=bounds["validation_end"],
         test_end=bounds["test_end"],
         files={"data": data_path.name},
+        preprocessing=_availability_policy(),
     )
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
@@ -300,6 +344,10 @@ def prepare_excel_inventory(source: Path, output_dir: Path, series_limit: int = 
     sales["SKU"] = sales["SKU"].astype(str).str.strip()
     sales["date"] = pd.to_datetime(sales["Дата продажи"], errors="coerce").dt.normalize()
     sales["sales"] = pd.to_numeric(sales["Продано"], errors="coerce").fillna(0).clip(lower=0)
+    availability = pd.Series(np.nan, index=sales.index)
+    if "Был в наличии" in sales:
+        availability = pd.to_numeric(sales["Был в наличии"], errors="coerce")
+    sales["in_stock"] = availability.where(availability.isin([0, 1]))
     sales = sales.dropna(subset=["date"])
     known = set(products["SKU"])
     sales = sales.loc[sales["SKU"].isin(known)]
@@ -315,6 +363,7 @@ def prepare_excel_inventory(source: Path, output_dir: Path, series_limit: int = 
     sales["snap"] = pd.to_numeric(sales["Промо"], errors="coerce").fillna(0).clip(0, 1)
     daily = sales.groupby(["SKU", "date"], observed=True).agg(
         sales=("sales", "sum"), is_event=("is_event", "max"), snap=("snap", "max"),
+        in_stock=("in_stock", _daily_availability),
     ).reset_index()
     dates = pd.date_range(daily["date"].min(), daily["date"].max(), freq="D")
     grid = pd.MultiIndex.from_product([selected_skus, dates], names=["SKU", "date"]).to_frame(index=False)
@@ -331,7 +380,7 @@ def prepare_excel_inventory(source: Path, output_dir: Path, series_limit: int = 
     output["year"] = output["date"].dt.year
     output = output[[
         "date", "id", "SKU", "Название", "Категория", "sales", "sell_price",
-        "wday", "month", "year", "is_event", "snap",
+        "wday", "month", "year", "is_event", "snap", "in_stock",
     ]].sort_values(["id", "date"])
     bounds = temporal_boundaries(output["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -345,6 +394,7 @@ def prepare_excel_inventory(source: Path, output_dir: Path, series_limit: int = 
         date_start=output["date"].min().date().isoformat(), date_end=output["date"].max().date().isoformat(),
         history_days=int(output["date"].nunique()), horizon_days=28, **bounds,
         files={"data": data_path.name},
+        preprocessing=_availability_policy(),
     )
     (output_dir / "manifest.json").write_text(json.dumps(asdict(manifest), ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest

@@ -12,12 +12,21 @@ Node.js и сборка фронтенда не нужны: интерфейс �
 ориентации в коде. Перед началом работы рекомендуется ознакомиться с краткой
 сводкой и использовать приведённые ниже готовые команды.
 
+На этом Windows-компьютере проект уже подготовлен и проверен локально.
+Из корня проекта запустите `./scripts/start-local.ps1 -Mode web` и откройте
+[Rayventory](http://127.0.0.1:8765). Для очереди используйте второй терминал:
+`./scripts/start-local.ps1 -Mode worker`. Проверки: `./scripts/start-local.ps1 -Mode verify`.
+Учётные данные администратора находятся в локальном `.env`.
+Подробности исправлений и результатов: [локальная проверка](docs/LOCAL_VALIDATION.md).
+
 ## Основные сведения и соглашения
 
 - Корень проекта содержит `artisan`, `composer.json` и каталог `ml/`.
 - Требуются PHP 8.2+, Composer 2, Python 3.11+ и PHP-расширения
   `pdo_sqlite`, `sqlite3`, `mbstring`, `zip`, `gd`.
 - Проверенное CI-окружение: PHP 8.2, Python 3.12 и Node.js 24.
+- Composer разрешает зависимости для PHP 8.2 через `config.platform.php`;
+  lock-файл совместим с заявленной минимальной версией.
 - Обычное приложение: `.venv` + `requirements.txt`.
 - Все Python-тесты и исследования: `.venv-ml` + `requirements-ml.txt`.
   Расширенный набор включает runtime-зависимости, PyTorch, Kaggle и `openpyxl`.
@@ -169,14 +178,18 @@ php artisan schedule:work
 
 ### Windows PowerShell
 
+Сначала установите PHP с перечисленными выше расширениями, Composer и Python.
+Задайте `RAYVENTORY_ADMIN_PASSWORD` в `.env` до `rayventory:setup`.
+
 ```powershell
 composer install --no-interaction --prefer-dist
 Copy-Item .env.example .env
 php artisan key:generate
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
+# Перед этой командой задайте пароль администратора в .env.
 php artisan rayventory:setup
-php artisan serve
+./scripts/start-local.ps1 -Mode web
 ```
 
 В `.env`:
@@ -184,6 +197,12 @@ php artisan serve
 ```dotenv
 ML_PYTHON=C:\absolute\path\to\luch-magistratura\.venv\Scripts\python.exe
 ```
+
+Скрипт выбирает `.tools/php/php.exe`, если установлен локальный portable PHP,
+иначе PHP из `PATH`; Python — из `.venv-ml`, затем `.venv`. Порт по умолчанию
+8765, другой можно задать через `-Port 8000`. Для полной проверки создайте
+`.venv-ml` и установите `requirements-ml.txt`; режим `verify` требует PyTorch.
+Каталоги `.tools`, `vendor`, виртуальные окружения и `.env` не входят в Git.
 
 ### PhpStorm
 
@@ -221,8 +240,8 @@ vendor/bin/pint --test
 .venv/bin/python -m compileall -q ml
 ```
 
-На момент написания ожидается не менее `22 tests, 128 assertions`. `phpunit.xml`
-задаёт отдельный тестовый `APP_KEY` и использует SQLite `:memory:`.
+`phpunit.xml` задаёт отдельный тестовый `APP_KEY` и использует SQLite `:memory:`.
+Точные результаты последней проверки сохранены в `docs/LOCAL_VALIDATION.md`.
 
 ### Полный Python-набор
 
@@ -244,26 +263,26 @@ composer audit --locked --no-interaction
 php artisan route:list --except-vendor
 ```
 
-`composer validate --strict` сейчас предупреждает только об отсутствии поля
-`license` в `composer.json`.
+`composer validate --strict` должен завершаться без предупреждений.
 
 ### Эквивалент CI
 
 `.github/workflows/quality.yml` запускается для каждого pull request и push в
 `main`. Проверки разделены на независимые задания PHP, Python, JavaScript,
-аудита зависимостей и сборки Docker. Устаревший запуск для той же ветки
+аудита зависимостей и сборки Docker. Python проверяется на Windows и Linux
+с полным набором ML-зависимостей и CPU PyTorch. Устаревший запуск для той же ветки
 автоматически отменяется.
 
 Локальный эквивалент основных проверок:
 
 ```bash
 composer install --no-interaction --prefer-dist
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+python3.12 -m venv .venv-ml
+.venv-ml/bin/python -m pip install -r requirements-ml.txt
 composer test
 vendor/bin/pint --test
-.venv/bin/python -m compileall -q ml
-.venv/bin/python -m unittest discover -s ml/tests -p 'test_*.py'
+.venv-ml/bin/python -m compileall -q ml
+.venv-ml/bin/python -m unittest discover -s ml/tests -p 'test_*.py'
 node --check public/js/app.js
 composer audit --locked --no-interaction
 docker build -t rayventory-ci .
@@ -430,6 +449,10 @@ Laravel передаёт `ML_BRANCH_ID`; Python фильтрует `branch_produ
 
 Встроенная модель — `seasonal-robust-v1` с диапазоном q10–q90. При повреждённом
 или несовместимом реестре runtime возвращается к baseline с предупреждением.
+Backtesting оценивает фактически активную модель; при fallback сохраняется
+название baseline. Промо, цена, тренд и сезонность учитываются и после
+подключения локального роутера. Поставки поступают в прогнозируемый остаток
+в свою дату; поздние или недатированные поставки не скрывают текущий дефицит.
 
 ## Исследовательский ML-контур
 
@@ -450,7 +473,10 @@ ML_RESEARCH_PYTHON=/absolute/path/to/luch-magistratura/.venv-ml/bin/python
 
 ### Локальная SQLite
 
-Минимум для SKU — 175 дней, рекомендуется 365:
+Подготовка датасета требует минимум 175 дней. Автоматический конвейер с тремя
+rolling-окнами требует минимум 262 дня истории и 262 ежедневных наблюдения
+хотя бы одного SKU; рекомендуется полный год. Для ручного `train` требования
+также зависят от истории, горизонта и числа окон.
 
 ```bash
 .venv-ml/bin/python ml/research_cli.py prepare-local
@@ -460,6 +486,12 @@ ML_RESEARCH_PYTHON=/absolute/path/to/luch-magistratura/.venv-ml/bin/python
 ```
 
 SQLite открывается только для чтения; производные файлы идут в `data/processed/`.
+Сохраняется `in_stock`: 0 — известный stockout, 1 — товар был доступен,
+пустое значение — доступность неизвестна. В Excel эта необязательная колонка
+называется `Был в наличии`. Окна с известным stockout в целевом горизонте
+исключаются из исследования, неизвестная доступность не превращается в stockout.
+История остаётся наблюдаемыми продажами: скрытый спрос не восстанавливается.
+После обновления этой обработки пересоздайте старые processed-датасеты.
 
 ### UCI Online Retail II
 
@@ -502,23 +534,68 @@ unzip /tmp/online-retail-ii.zip -d data/raw/uci-online-retail
 
 `scale` проверяет 10/100/300 рядов. `report` объединяет эксперименты, сценарии и
 масштабирование в Markdown и SVG.
+Пиковая память относится ко всему времени жизни общего процесса, поэтому
+последовательные запуски не дают независимых пиков отдельных архитектур.
 
 Сравниваются seasonal naive, медиана 28 дней, Croston-SBA, адаптивные baseline и
 LSTM/GRU/Transformer. Нормализация строится только по train каждого rolling-окна,
 выбор маршрута — по validation, финальные метрики — по более позднему test. Нельзя
 допускать утечку будущих данных при изменении pipeline.
 
+`tune` сравнивает конфигурации только по validation и не строит reserved test.
+После выбора конфигурации выполните один финальный `train --folds 1` с её
+параметрами. Rolling-окна финального `train --folds 3` могут пересекать периоды,
+уже использованные при tuning, поэтому их нельзя считать независимой оценкой
+подобранной конфигурации. Три test-окна допустимы для заранее фиксированного
+сравнения без подбора по этим периодам. Явные границы manifest сохраняются.
+
+Предварительное сравнение LSTM, GRU и Transformer на реальных данных UCI
+сохранено в [исследовательском отчёте](docs/research/local-validation/report.md).
+Это проверка выполнения кода на небольшой выборке, а не полный эксперимент
+для диссертации; в ней медианный baseline оказался точнее нейросетей.
+
+Основное исследование по требованиям ИУП находится в
+[полном отчёте](docs/research/full-study/report.md): 100 реальных товаров,
+24 validation-конфигурации, три seeds итоговой оценки, четыре контролируемых
+сценария и независимые замеры ресурсов на 10/100/300 рядах.
+Правила зафиксированы до итогового test. Сохранены исходные результаты,
+параметры, графики и веса всех трёх прототипов с общим публичным примером.
+[Методология](docs/RESEARCH_METHODOLOGY.md),
+[сверка с ИУП](docs/IUP_ACCEPTANCE.md) и
+[сценарий демонстрации](docs/DEFENSE_DEMO.md) объясняют выводы и ограничения.
+Номинальный интервал q10–q90 требует проверки фактического покрытия;
+упорядоченные квантили сами по себе не гарантируют уровень сервиса.
+
+```powershell
+.venv-ml\Scripts\python.exe -m ml.research.demo --checkpoint docs/research/full-study/demo/gru.pt --example docs/research/full-study/demo/example.json
+```
+
+Для воспроизведения обучения скачайте официальный UCI Online Retail II
+и выполните команды из полного отчёта. `ml.research.study` сохраняет протокол,
+запускает каждый замер в отдельном процессе и возобновляет завершённые задания.
+Старый `research_cli.py scale` сохраняет прежний замер общего процесса;
+независимое сравнение архитектур находится в новом основном исследовании.
+
 ## Реестр и публикация моделей
 
-Candidate проверяется на минимум трёх rolling-окнах, корректность метрик,
+Production-candidate проверяется на минимум трёх rolling-окнах, корректность метрик,
 локальное происхождение данных и совместимость с runtime. Модель на UCI нельзя
 публиковать в production. Локальные роутеры упаковываются в
 `local-demand-router-v1`. Публикация требует явного `PROMOTE`, предыдущая версия
 архивируется.
+Результаты только на validation отображаются как validation и не проходят
+публикацию; нужен подтверждённый test. Один финальный test после tuning
+достаточен для исследовательского отчёта, но не отменяет отдельные требования
+production-gate. Нейросетевые модели пока используются в исследовательском
+контуре; production поддерживает baseline и локальные роутеры.
 
 После Excel-импорта при достаточной истории очередь создаёт приватный датасет,
 оценивает baseline, регистрирует candidate и ждёт ручной публикации. Для этого
 должен работать `queue:work`.
+Задача отправляется в database-очередь и не выполняется в HTTP-процессе.
+`retry_after` очереди должен превышать 3600-секундный timeout обучения;
+стандартное значение проекта — 3660 секунд. После изменения этих настроек
+перезапустите worker.
 
 ## API
 
