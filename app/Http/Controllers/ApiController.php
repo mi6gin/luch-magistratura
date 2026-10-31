@@ -380,6 +380,9 @@ class ApiController extends Controller
             if ($quantity < 1) {
                 continue;
             }
+            $pack = max(1, (int) ($action['planning']['pack_size'] ?? 1));
+            $minimum = max(1, (int) ($action['planning']['minimum_order_quantity'] ?? 1));
+            abort_if($quantity < $minimum || $quantity % $pack !== 0, 422, 'Количество нарушает минимальную партию или кратность упаковки.');
             $items[] = [
                 ...$action,
                 'quantity' => $quantity,
@@ -450,7 +453,7 @@ class ApiController extends Controller
         abort_unless(DB::table('branch_products')->where('branch_id', $this->branches->id())->where('product_id', $data['product_id'])->exists(), 422, 'Товар не принадлежит выбранному филиалу.');
         WarehouseStock::updateOrCreate(
             ['branch_id' => $this->branches->id(), 'product_id' => $data['product_id']],
-            ['current_quantity' => $data['quantity']],
+            ['current_quantity' => $data['quantity'], 'as_of_date' => now()->toDateString()],
         );
 
         return response()->json(['success' => true]);

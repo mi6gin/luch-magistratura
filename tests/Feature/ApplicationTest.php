@@ -281,6 +281,13 @@ class ApplicationTest extends TestCase
                 'model' => 'risk_calibrated_router',
                 'metrics' => ['wape_pct' => 18.2, 'risk_cost_pct' => 22.0],
                 'routes' => ['smooth' => 'moving_median_28 × 1.25'],
+                'runtime_validation' => [
+                    'runtime' => 'local-demand-router-v1', 'contract' => 'seasonal-profile-calibration-v1',
+                    'evaluation_split' => 'test', 'observations' => 28, 'actual_volume' => 280,
+                    'routes' => ['smooth' => 'moving_median_28 × 1.25'],
+                    'metrics' => ['wape_pct' => 18.2, 'risk_cost_pct' => 22.0],
+                    'baseline_metrics' => ['wape_pct' => 20.0, 'risk_cost_pct' => 25.0],
+                ],
             ]],
         ], JSON_THROW_ON_ERROR));
 

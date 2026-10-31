@@ -8,3 +8,6 @@
 - Исследовательские прототипы LSTM, GRU и Transformer.
 
 **Стек:** Laravel 12, Python, PyTorch, SQLite, JavaScript.
+
+Правила расчёта закупок, проверка рабочего алгоритма, обработка нулевого спроса
+и команда исторической симуляции описаны в [проверке решений](docs/INVENTORY_DECISION_VALIDATION.md).

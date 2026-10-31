@@ -29,7 +29,7 @@ def worker(request: Path) -> None:
     job = json.loads(request.read_text(encoding="utf-8"))
     started = time.perf_counter()
     result = run_experiment(Path(job["data"]), Path(job["manifest"]), Path(job["artifacts"]),
-                            [job["model"]], TrainingConfig(**job["config"]),
+                            [job["model"]], TrainingConfig(**{"quantile_parameterization": "softplus_increments_v2", **job["config"]}),
                             folds=1, evaluation_split=job["split"])
     result["resource_measurement"] = {
         "pid": os.getpid(), "fresh_process": True,

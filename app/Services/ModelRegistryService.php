@@ -49,7 +49,7 @@ class ModelRegistryService
         $policyCompatible = in_array($model, ['adaptive_demand_router', 'risk_calibrated_router'], true)
             && $this->validRoutes($result['routes'] ?? []);
         $runtimeCompatible = $localDataset && $policyCompatible;
-        $qualityGate = $this->qualityGate($model, $result, $experiment['results'] ?? []);
+        $qualityGate = $this->qualityGate($model, $result);
         $artifact = $runtimeCompatible ? $this->packagePolicy($id, $experimentId, $model, $result['routes']) : null;
         $checks = [
             ['code' => 'test_evaluation', 'passed' => $testEvaluated, 'message' => $testEvaluated ? 'Кандидат оценён на тестовых окнах.' : 'Результаты подбора на validation нельзя публиковать без отдельной тестовой оценки.'],
@@ -66,7 +66,9 @@ class ModelRegistryService
             'experiment_id' => $experimentId,
             'dataset' => $experiment['dataset']['dataset'] ?? 'Неизвестный набор',
             'registered_at' => now()->toIso8601String(),
-            'metrics' => $result['metrics'] ?? [],
+            'metrics' => $result['runtime_validation']['metrics'] ?? $result['metrics'] ?? [],
+            'research_metrics' => $result['metrics'] ?? [],
+            'runtime_validation' => $result['runtime_validation'] ?? null,
             'checks' => $checks,
             'eligible' => collect($checks)->every(fn (array $check): bool => $check['passed']),
             'artifact_path' => $artifact,
@@ -88,6 +90,9 @@ class ModelRegistryService
         }
         if (! ($candidate['eligible'] ?? false)) {
             throw new InvalidArgumentException('Публикация заблокирована: кандидат не прошёл обязательные проверки.');
+        }
+        if (($candidate['runtime_validation']['contract'] ?? null) !== 'seasonal-profile-calibration-v1') {
+            throw new InvalidArgumentException('Повторите эксперимент: рабочий алгоритм кандидата не проверен.');
         }
 
         $state['models'] = collect($state['models'])->map(function (array $item) use ($id): array {
@@ -143,24 +148,29 @@ class ModelRegistryService
             && preg_match('/^(seasonal_naive_7|moving_median_28|croston_sba)( × (?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$/', $route) === 1);
     }
 
-    private function qualityGate(string $model, array $result, array $results): array
+    private function qualityGate(string $model, array $result): array
     {
         $metric = $model === 'risk_calibrated_router' ? 'risk_cost_pct' : 'wape_pct';
-        $references = collect($results)->whereIn('model', [
-            'seasonal_naive_7', 'moving_median_28', 'croston_sba',
-        ])->pluck("metrics.{$metric}")->filter(fn (mixed $value): bool => is_numeric($value))->map(fn (mixed $value): float => (float) $value);
-        $candidate = $result['metrics'][$metric] ?? null;
-        if (! is_numeric($candidate) || $references->isEmpty()) {
-            return ['passed' => false, 'message' => "Нельзя проверить {$metric}: отсутствует кандидат или baseline."];
+        $proof = $result['runtime_validation'] ?? [];
+        $candidate = $proof['metrics'][$metric] ?? null;
+        $reference = $proof['baseline_metrics'][$metric] ?? null;
+        $valid = ($proof['runtime'] ?? null) === 'local-demand-router-v1'
+            && ($proof['contract'] ?? null) === 'seasonal-profile-calibration-v1'
+            && ($proof['evaluation_split'] ?? null) === 'test'
+            && ($proof['routes'] ?? null) === ($result['routes'] ?? null)
+            && (int) ($proof['observations'] ?? 0) > 0
+            && (float) ($proof['actual_volume'] ?? 0) > 0;
+        if (! $valid || ! is_numeric($candidate) || ! is_numeric($reference)
+            || ! is_finite((float) $candidate) || ! is_finite((float) $reference)) {
+            return ['passed' => false, 'message' => 'Нужна тестовая оценка рабочего алгоритма с теми же маршрутами; исследовательских метрик недостаточно.'];
         }
-        $reference = (float) $references->min();
         $passed = (float) $candidate <= $reference;
 
         return [
             'passed' => $passed,
             'message' => $passed
-                ? sprintf('%s %.2f не хуже лучшего baseline %.2f.', $metric, $candidate, $reference)
-                : sprintf('%s %.2f хуже лучшего baseline %.2f.', $metric, $candidate, $reference),
+                ? sprintf('Рабочий алгоритм: %s %.2f не хуже seasonal-robust %.2f.', $metric, $candidate, $reference)
+                : sprintf('Рабочий алгоритм: %s %.2f хуже seasonal-robust %.2f.', $metric, $candidate, $reference),
         ];
     }
 
@@ -172,6 +182,7 @@ class ModelRegistryService
         File::put($path, json_encode([
             'schema_version' => 1,
             'runtime' => 'local-demand-router-v1',
+            'contract' => 'seasonal-profile-calibration-v1',
             'experiment_id' => $experimentId,
             'source_model' => $sourceModel,
             'routes' => $routes,

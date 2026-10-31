@@ -16,8 +16,10 @@ import pandas as pd
 
 try:
     from .runtime_policy import apply_active_policy
+    from .purchasing import plan_order, purchase_settings, stock_freshness
 except ImportError:
     from runtime_policy import apply_active_policy
+    from purchasing import plan_order, purchase_settings, stock_freshness
 
 
 MODEL_NAME = "seasonal-robust-v1"
@@ -146,6 +148,9 @@ def load_inventory_data(
         products = pd.read_sql_query("SELECT * FROM products", connection)
         sales = pd.read_sql_query("SELECT * FROM sales_history", connection)
         stock = pd.read_sql_query("SELECT * FROM warehouse_stock", connection)
+        settings = pd.read_sql_query("SELECT * FROM product_planning_settings", connection) if "product_planning_settings" in table_names else pd.DataFrame()
+        if "branch_id" in settings.columns:
+            settings = settings.loc[settings["branch_id"] == branch_id]
         if "warehouse_in_transit" in table_names:
             transit = pd.read_sql_query("SELECT * FROM warehouse_in_transit", connection)
         else:
@@ -187,6 +192,11 @@ def load_inventory_data(
         raise ValueError("Products table contains duplicate SKU ids.")
     products["lead_time"] = pd.to_numeric(products["lead_time"], errors="coerce").fillna(1).clip(lower=1).astype(int)
     products["unit_price"] = pd.to_numeric(products["unit_price"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    if not settings.empty:
+        columns = [name for name in ("product_id", "minimum_order_quantity", "pack_size", "replenishable", "target_cover_days", "safety_stock_days") if name in settings]
+        if "product_id" not in columns or settings["product_id"].duplicated().any():
+            raise ValueError("Настройки закупок должны содержать одну строку на товар филиала.")
+        products = products.merge(settings[columns], left_on="id", right_on="product_id", how="left", validate="one_to_one").drop(columns="product_id")
 
     sales = sales.copy()
     sales["product_id"] = pd.to_numeric(sales["product_id"], errors="coerce")
@@ -229,7 +239,11 @@ def load_inventory_data(
     stock["current_quantity"] = pd.to_numeric(stock["current_quantity"], errors="coerce").fillna(0.0).clip(lower=0.0)
     stock = stock.dropna(subset=["product_id"])
     stock["product_id"] = stock["product_id"].astype(int)
-    stock = stock.groupby("product_id", as_index=False, observed=True)["current_quantity"].last()
+    stock["stock_as_of"] = pd.to_datetime(stock.get("as_of_date", pd.Series(pd.NaT, index=stock.index)), errors="coerce").dt.normalize()
+    stock = stock.groupby("product_id", as_index=False, observed=True).agg(
+        current_quantity=("current_quantity", "sum"),
+        stock_as_of=("stock_as_of", lambda dates: pd.NaT if dates.isna().any() or (dates > pd.Timestamp.now().normalize()).any() else dates.min()),
+    )
 
     if transit.empty or not {"product_id", "in_transit_quantity"}.issubset(transit.columns):
         transit = pd.DataFrame(columns=["product_id", "in_transit_quantity", "expected_date"])
@@ -663,6 +677,9 @@ def forecast_product(
         "staleness_days": int(stale_days),
         "interval": "unavailable",
     }
+    quality.update(stock_freshness(product))
+    if quality["stock_warning"]:
+        warnings.append(quality["stock_warning"])
     warnings.extend(_quality_warnings(quality))
 
     rounded = {name: np.round(values.astype(float), 3).tolist() for name, values in projection.items()}
@@ -880,32 +897,42 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
         warnings.append(evaluation_warning)
 
     for product in products.itertuples(index=False):
-        forecast = forecast_product(int(product.id), data, strategy=report_type)
+        settings = purchase_settings(product._asdict())
+        forecast = forecast_product(int(product.id), data, strategy=report_type,
+                                    horizon=max(FORECAST_HORIZON, settings["coverage_days"]))
+        purchase = plan_order(product._asdict(), forecast)
         runtime_models[forecast["model"]] = runtime_models.get(forecast["model"], 0) + 1
         warnings.extend(forecast["warnings"])
-        lead_time = min(max(int(product.lead_time), 1), FORECAST_HORIZON)
-        if int(product.lead_time) > FORECAST_HORIZON:
-            warnings.append(
-                f"Срок поставки товара {int(product.id)} превышает {FORECAST_HORIZON} дней и ограничен горизонтом."
-            )
+        lead_time = int(product.lead_time)
         selected_quantile = str(strategy["quantile"])
         lead_demand = float(np.sum(np.asarray(forecast[selected_quantile], dtype=float)[:lead_time]))
         median_lead_demand = float(np.sum(np.asarray(forecast["q50"], dtype=float)[:lead_time]))
-        upper_lead_demand = float(np.sum(np.asarray(forecast["q90"], dtype=float)[:lead_time]))
         on_hand = max(_as_float(product.current_quantity), 0.0)
         in_transit = max(_as_float(product.in_transit_quantity), 0.0)
         receipts = np.asarray(forecast["receipts"], dtype=float)
         available = on_hand + float(receipts[:lead_time].sum())
-        order_quantity = int(math.ceil(max(lead_demand - available, 0.0)))
+        order_quantity = purchase["order_quantity"]
         daily_median = max(float(np.mean(forecast["q50"])), 1e-9)
         days_cover = on_hand / daily_median
-        stockout = _stockout_date(forecast, on_hand)
+        stockout = _stockout_date({**forecast, "q50": forecast[selected_quantile]}, on_hand)
         best_order_date = None
         if stockout:
             best_order_date = (
                 pd.Timestamp(stockout) - pd.Timedelta(days=int(product.lead_time))
             ).date().isoformat()
-        action_label = "ЗАКАЗ" if order_quantity > 0 else "КОНТРОЛЬ"
+        action_label = {"disabled": "ПОПОЛНЕНИЕ ОТКЛЮЧЕНО", "refresh_stock": "ОБНОВИТЬ ОСТАТКИ",
+                        "order": "ЗАКАЗ", "monitor": "КОНТРОЛЬ"}[purchase["order_status"]]
+        reasons = _recommendation_reasons(
+            order_quantity=order_quantity, stockout=stockout, selected_quantile=selected_quantile,
+            lead_time=lead_time, available=available, lead_demand=lead_demand, quality=forecast["quality"],
+        )
+        if purchase["order_status"] in {"disabled", "refresh_stock"}:
+            reasons[-1] = "Заказ не сформирован: пополнение отключено." if purchase["order_status"] == "disabled" else purchase["stock_warning"]
+        reasons.append(f"Период покрытия {settings['coverage_days']} дн.; минимальная партия {settings['minimum_order_quantity']}, упаковка {settings['pack_size']} ед.")
+        if purchase["expedite_required"]:
+            reasons.append("Дефицит возможен до поступления нового заказа: требуется ускоренная поставка или перемещение.")
+        if selected_quantile != "q50":
+            reasons.append("Сумма дневных квантилей — сценарный ориентир, а не подтверждённая вероятность покрытия спроса за срок поставки.")
         priority_score = order_quantity * max(_as_float(product.unit_price), 1.0)
         if stockout:
             priority_score += 1_000_000.0
@@ -924,27 +951,20 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
                 "selected_quantile": selected_quantile,
                 "lead_time_demand": round(lead_demand, 2),
                 "median_lead_time_demand": round(median_lead_demand, 2),
-                "safety_stock": round(max(upper_lead_demand - median_lead_demand, 0.0), 2),
+                "safety_stock": round(purchase["configured_safety_stock"], 2),
+                "planning": purchase,
                 "order_quantity": order_quantity,
                 "order_value": round(order_quantity * _as_float(product.unit_price), 2),
-                "forecast_30_q10": round(float(np.sum(forecast["q10"])), 2),
-                "forecast_30_q50": round(float(np.sum(forecast["q50"])), 2),
-                "forecast_30_q90": round(float(np.sum(forecast["q90"])), 2),
+                "forecast_30_q10": round(float(np.sum(forecast["q10"][:FORECAST_HORIZON])), 2),
+                "forecast_30_q50": round(float(np.sum(forecast["q50"][:FORECAST_HORIZON])), 2),
+                "forecast_30_q90": round(float(np.sum(forecast["q90"][:FORECAST_HORIZON])), 2),
                 "days_cover": round(days_cover, 1),
                 "stockout_date": stockout,
                 "best_order_date": best_order_date,
                 "action": action_label,
                 "priority_score": round(priority_score, 2),
                 "quality": forecast["quality"],
-                "reasons": _recommendation_reasons(
-                    order_quantity=order_quantity,
-                    stockout=stockout,
-                    selected_quantile=selected_quantile,
-                    lead_time=lead_time,
-                    available=available,
-                    lead_demand=lead_demand,
-                    quality=forecast["quality"],
-                ),
+                "reasons": reasons,
                 "warnings": forecast["warnings"],
                 "forecast": {
                     "dates": forecast["dates"],
@@ -1005,7 +1025,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
             "forecast_end": actions[0]["forecast"]["dates"][-1] if actions else None,
             "model": next(iter(runtime_models)) if len(runtime_models) == 1 else "mixed-runtime" if runtime_models else MODEL_NAME,
             "runtime_models": runtime_models,
-            "horizon_days": FORECAST_HORIZON,
+            "horizon_days": max((len(item["forecast"]["dates"]) for item in actions), default=FORECAST_HORIZON),
             "sku_count": len(actions),
             "category_count": len(category_summaries),
             "currency": "KZT",
@@ -1032,6 +1052,7 @@ def build_report_document(report_type: str = "standard") -> dict[str, Any]:
             "oos_rows_recovered": int(data["sales"]["was_oos_recovered"].sum()),
             "holdout_coverage_pct": metrics["coverage_pct"],
             "freshness_days": stale_days,
+            "stock_refresh_required_skus": sum(not item["quality"]["stock_fresh"] for item in actions),
             "checks": {
                 "all_skus_included": len(actions) == len(products),
                 "quantiles_ordered": all(

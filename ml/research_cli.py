@@ -79,6 +79,7 @@ def main() -> None:
     train.add_argument("--patience", type=int, default=10)
     train.add_argument("--batch-size", type=int, default=64)
     train.add_argument("--folds", type=int, choices=range(1, 7), default=3)
+    train.add_argument("--quantile-parameterization", choices=["zero_inflated_lognormal_v3", "softplus_increments_v2", "sorted_clamped_v1"], default="zero_inflated_lognormal_v3")
     train.add_argument("--summary", action="store_true", help="Print a compact result instead of the full experiment document")
     scale = subparsers.add_parser("scale", help="Measure neural accuracy and runtime as the number of series grows")
     scale.add_argument("--data", type=Path, required=True)
@@ -131,7 +132,8 @@ def main() -> None:
             "total_seconds": result["total_seconds"],
         }, ensure_ascii=False))
     elif args.action == "train":
-        config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size)
+        config = TrainingConfig(max_epochs=args.epochs, patience=args.patience, batch_size=args.batch_size,
+                                quantile_parameterization=args.quantile_parameterization)
         result = run_experiment(args.data, args.manifest, args.output, args.models, config, folds=args.folds)
         output = {
             "success": True,

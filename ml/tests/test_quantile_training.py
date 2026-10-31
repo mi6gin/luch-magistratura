@@ -12,7 +12,8 @@ class QuantileTrainingTest(unittest.TestCase):
         torch, _ = require_torch()
         for architecture in ['lstm', 'gru', 'transformer']:
             with self.subTest(architecture=architecture):
-                model = build_model(architecture, 2, history_days=8, horizon_days=3, hidden_size=8)
+                model = build_model(architecture, 2, history_days=8, horizon_days=3, hidden_size=8,
+                                    quantile_parameterization="softplus_increments_v2")
                 with torch.no_grad():
                     for parameter in model.parameters():
                         parameter.zero_()
