@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->authenticateSessions();
         $middleware->append(SecurityHeaders::class);
         $middleware->append(ResolveBranch::class);
         $middleware->alias(['branch.access' => EnsureBranchAccess::class, 'audit' => AuditMutations::class]);

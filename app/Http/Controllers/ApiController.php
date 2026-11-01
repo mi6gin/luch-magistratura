@@ -167,12 +167,12 @@ class ApiController extends Controller
             'current_password' => ['required', 'current_password'],
             'password' => ['required', 'string', 'max:128', 'confirmed', Password::min(12)->mixedCase()->letters()->numbers()->symbols()],
         ]);
-        $request->user()->update(['password' => $data['password']]);
         Auth::logoutOtherDevices($data['current_password']);
+        $request->user()->update(['password' => $data['password']]);
         $request->session()->regenerate();
         $request->session()->regenerateToken();
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'csrf_token' => $request->session()->token()]);
     }
 
     public function inventoryTemplate(Request $request): BinaryFileResponse

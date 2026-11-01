@@ -2,7 +2,7 @@
     const root = document.documentElement;
     const page = document.body.dataset.page;
     let activeBranchId = Number(localStorage.getItem('rayventory-branch-id')) || null;
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    let csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const branchStorageKey = name => `rayventory-branch-${activeBranchId || 'default'}-${name}`;
     const savedTheme = localStorage.getItem('rayventory-theme')
         || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -781,7 +781,16 @@
     async function loadResearchReport() {
         const data = await api('research-report');
         const report = data.report;
-        if (!report) return;
+        const charts = document.querySelectorAll('.research-chart-grid img');
+        if (!report) {
+            document.querySelector('#research-report-meta').textContent = 'Итоговое исследование для этого филиала ещё не подготовлено.';
+            document.querySelector('#research-scale-results').innerHTML = '<tr><td colspan="4">Нет результатов масштабирования.</td></tr>';
+            return;
+        }
+        charts.forEach(image => {
+            image.src = image.dataset.researchSrc;
+        });
+        document.querySelector('.research-chart-grid')?.classList.remove('hidden');
         document.querySelector('#research-report-meta').textContent = `${report.dataset} · ${report.rolling_folds} rolling-окна`;
         document.querySelector('#research-best-neural').textContent = report.best_neural ? `ЛУЧШАЯ НС · ${String(report.best_neural).toUpperCase()}` : 'НЕЙРОСЕТИ НЕ ОЦЕНИВАЛИСЬ';
         document.querySelector('#research-verdict').textContent = report.conclusion;
@@ -1465,11 +1474,15 @@
     document.querySelector('#password-change-form')?.addEventListener('submit', async event => {
         event.preventDefault();
         try {
-            await api('account/password', { method: 'POST', body: JSON.stringify({
+            const result = await api('account/password', { method: 'POST', body: JSON.stringify({
                 current_password: document.querySelector('#current-password').value,
                 password: document.querySelector('#new-password').value,
                 password_confirmation: document.querySelector('#new-password-confirmation').value,
             }) });
+            if (result.csrf_token) {
+                csrfToken = result.csrf_token;
+                document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrfToken);
+            }
             event.target.reset();
             toast('Пароль обновлён');
         } catch (error) { toast(error.message, 'error'); }

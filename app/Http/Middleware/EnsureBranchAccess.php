@@ -24,7 +24,7 @@ class EnsureBranchAccess
         if (! in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)) {
             $role = $user->roleForBranch($this->branches->id());
             $purchaserAction = $request->is('api/purchase-plan/export');
-            $personalAction = $request->is('api/account/password');
+            $personalAction = $request->is('api/account/password', 'logout');
             abort_if(! $personalAction && ($role === 'viewer' || ($role === 'purchaser' && ! $purchaserAction)), 403, 'Недостаточно прав для изменения данных.');
         }
 
