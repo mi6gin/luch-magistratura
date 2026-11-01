@@ -129,6 +129,7 @@ class ApplicationTest extends TestCase
         $limited = User::create(['name' => 'Limited', 'email' => 'limited@example.test', 'password' => 'password']);
         $limited->branches()->attach(1, ['role' => 'analyst']);
         $this->actingAs($limited)->withHeaders($this->branchHeaders($branchId))->getJson('/api/stock')->assertForbidden();
+        $this->flushSession();
         $this->actingAs($this->user)->withHeaders($this->branchHeaders($branchId))->getJson('/api/stock')->assertOk()->assertExactJson([]);
     }
 
