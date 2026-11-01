@@ -41,6 +41,9 @@ class InventoryDecisionTest extends TestCase
 
     public function test_export_rejects_partial_packs_even_if_client_submits_them(): void
     {
+        \DB::table('products')->insert(['id' => 1, 'sku' => 'PACK-1', 'name' => 'Pack item', 'category' => 'Test', 'lead_time' => 1, 'unit_price' => 100]);
+        \DB::table('branch_products')->insert(['branch_id' => 1, 'product_id' => 1, 'lead_time' => 1, 'unit_price' => 100, 'active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        \DB::table('sales_history')->insert(['branch_id' => 1, 'product_id' => 1, 'sale_date' => today()->toDateString(), 'quantity_sold' => 1, 'in_stock' => true, 'is_holiday' => false, 'is_promo' => false]);
         $ml = $this->createMock(MlBridge::class);
         $ml->method('planning')->willReturn(['success' => true, 'actions' => [[
             'product_id' => 1, 'order_quantity' => 120,
@@ -49,7 +52,8 @@ class InventoryDecisionTest extends TestCase
         $this->app->instance(MlBridge::class, $ml);
         foreach ([99, 100, 119] as $quantity) {
             $this->postJson('/api/purchase-plan/export', ['items' => [['product_id' => 1, 'quantity' => $quantity]]])
-                ->assertUnprocessable();
+                ->assertUnprocessable()
+                ->assertJsonPath('message', 'Количество нарушает минимальную партию или кратность упаковки.');
         }
     }
 }

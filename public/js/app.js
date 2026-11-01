@@ -479,6 +479,19 @@
         try {
             const data = await api('purchase-plan');
             purchaseActions = data.actions || [];
+            if (data.has_data === false) {
+                renderPurchaseBasket();
+                ['purchase-units', 'purchase-value', 'purchase-risk', 'purchase-quality'].forEach(id => {
+                    document.getElementById(id).textContent = 'н/д';
+                });
+                document.querySelector('#purchase-quality-note').textContent = 'нужны исходные данные';
+                document.querySelector('#purchase-data-date').textContent = 'данные не загружены';
+                document.querySelector('#quality-grid').innerHTML = '';
+                const warningBox = document.querySelector('#purchase-warnings');
+                warningBox.textContent = data.message;
+                warningBox.classList.remove('hidden');
+                return;
+            }
             document.querySelector('#purchase-units').textContent = Number(data.portfolio.recommended_order_units).toLocaleString('ru-RU');
             document.querySelector('#purchase-value').textContent = `${Number(data.portfolio.recommended_order_value).toLocaleString('ru-RU')} ₸`;
             document.querySelector('#purchase-risk').textContent = `${data.portfolio.at_risk_skus} SKU`;
@@ -851,6 +864,17 @@
         try {
             const data = await api(`model-health${refresh ? '?refresh=1' : ''}`);
             const item = data.latest;
+            if (!item) {
+                ['health-freshness', 'health-wape', 'health-bias', 'health-coverage'].forEach(id => {
+                    document.getElementById(id).textContent = 'н/д';
+                });
+                document.querySelector('#health-status').textContent = 'НЕТ ДАННЫХ';
+                document.querySelector('#health-freshness-note').textContent = 'история не загружена';
+                document.querySelector('#health-summary').textContent = data.message;
+                document.querySelector('#health-details').innerHTML = '';
+                document.querySelector('#model-health-history').innerHTML = '<tr><td colspan="6">История пока пуста</td></tr>';
+                return;
+            }
             const metrics = item.metrics || {};
             const evaluable = Boolean(item.evaluable);
             const freshnessLabels = { fresh: 'АКТУАЛЬНО', warning: 'УСТАРЕВАЮТ', critical: 'УСТАРЕЛИ' };
@@ -1046,6 +1070,13 @@
     };
 
     async function runSimulationAsync() {
+        if (!document.querySelector('#sim-product')?.value) {
+            document.querySelector('#simulation-status').textContent = 'В филиале пока нет товаров. Загрузите Excel на странице склада.';
+            document.querySelector('#run-simulation').disabled = true;
+            document.querySelector('#chart-empty b').textContent = 'Для сценария нужны исходные данные';
+            document.querySelector('#chart-empty small').textContent = 'Добавьте товары и историю продаж на странице склада.';
+            return;
+        }
         const button = document.querySelector('#run-simulation');
         const panel = document.querySelector('.chart-panel');
         const status = document.querySelector('#simulation-status');

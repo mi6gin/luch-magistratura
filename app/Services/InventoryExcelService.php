@@ -375,6 +375,7 @@ class InventoryExcelService
 
     public function preview(UploadedFile $file, ?int $branchId = null): array
     {
+        $branchId ??= 1;
         try {
             $reader = IOFactory::createReaderForFile($file->getRealPath());
             $reader->setReadDataOnly(true);
@@ -419,13 +420,22 @@ class InventoryExcelService
             ];
         }
 
+        $this->validateSharedCatalog($productRows, $branchId);
+
         $salesRows = [];
+        $seenSales = [];
         foreach ($sales as $index => $row) {
             $line = $index + 2;
             $id = $this->knownSku($row[0], $productIds, "Продажи, строка {$line}");
+            $date = $this->date($row[1], "Продажи, строка {$line}: дата");
+            $key = $id.'|'.$date;
+            if (isset($seenSales[$key])) {
+                throw new InvalidArgumentException("Продажи, строка {$line}: для одного SKU и даты допускается одна итоговая строка. Объедините повторяющиеся продажи.");
+            }
+            $seenSales[$key] = true;
             $salesRows[] = [
                 'product_id' => $id,
-                'sale_date' => $this->date($row[1], "Продажи, строка {$line}: дата"),
+                'sale_date' => $date,
                 'quantity_sold' => $this->nonNegativeInt($row[2], "Продажи, строка {$line}: продано"),
                 'in_stock' => $this->flag($row[3], "Продажи, строка {$line}: был в наличии"),
                 'is_holiday' => $this->flag($row[4], "Продажи, строка {$line}: праздник"),
@@ -575,6 +585,7 @@ class InventoryExcelService
         }
 
         DB::transaction(function () use ($payload, $branchId): void {
+            $this->validateSharedCatalog($payload['productRows'], $branchId);
             DB::table('sales_history')->where('branch_id', $branchId)->delete();
             DB::table('warehouse_stock')->where('branch_id', $branchId)->delete();
             DB::table('warehouse_in_transit')->where('branch_id', $branchId)->delete();
@@ -642,6 +653,23 @@ class InventoryExcelService
         ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 
         return $result;
+    }
+
+    private function validateSharedCatalog(array $products, int $branchId): void
+    {
+        foreach (array_chunk($products, 500) as $chunk) {
+            $shared = DB::table('products')
+                ->join('branch_products as bp', 'bp.product_id', '=', 'products.id')
+                ->where('bp.branch_id', '!=', $branchId)
+                ->whereIn('products.sku', array_column($chunk, 'sku'))
+                ->select('products.sku', 'products.name', 'products.category')->distinct()->get()->keyBy('sku');
+            foreach ($chunk as $product) {
+                $existing = $shared->get($product['sku']);
+                if ($existing && ($existing->name !== $product['name'] || $existing->category !== $product['category'])) {
+                    throw new InvalidArgumentException("SKU {$product['sku']} используется в других филиалах. Название и категория должны совпадать с общим справочником; импорт не может изменять данные других филиалов.");
+                }
+            }
+        }
     }
 
     private function readSheet(Spreadsheet $book, string $name, array $headers, int $columns, bool $optional = false): array
