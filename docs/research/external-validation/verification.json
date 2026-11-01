@@ -1,0 +1,7 @@
+{
+  "forecast_rows_recomputed": 23520,
+  "inventory_paths_checked": 5040,
+  "primary_daily_movements_checked": 23520,
+  "paired_bootstrap_resamples_recomputed": 10000,
+  "status": "PASS"
+}

@@ -12,6 +12,7 @@ import numpy as np
 
 
 POLICY_RUNTIME = "local-demand-router-v1"
+POLICY_CONTRACT = "seasonal-profile-calibration-v1"
 METHOD_PATTERN = re.compile(r"^(seasonal_naive_7|moving_median_28|croston_sba)(?: × ([0-9]+(?:\.[0-9]+)?|\.[0-9]+))?$")
 
 
@@ -79,6 +80,13 @@ def apply_active_policy(
     artifact, warning = load_active_policy()
     if artifact is None:
         return projection, "seasonal-robust-v1", warning
+    return apply_policy(artifact, history, projection, reference_level=reference_level,
+                        dates=dates, sanity_cap=sanity_cap)
+
+
+def apply_policy(artifact: dict, history, projection: dict[str, np.ndarray], *,
+                 reference_level=None, dates=None, sanity_cap=None):
+    """The single prediction path used both by deployment and candidate validation."""
     if "sale_date" in history:
         history = history.sort_values("sale_date", kind="stable")
     demand = np.asarray(history["recovered_demand"].tail(90), dtype=float)

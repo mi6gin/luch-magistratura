@@ -167,12 +167,12 @@ class ApiController extends Controller
             'current_password' => ['required', 'current_password'],
             'password' => ['required', 'string', 'max:128', 'confirmed', Password::min(12)->mixedCase()->letters()->numbers()->symbols()],
         ]);
-        $request->user()->update(['password' => $data['password']]);
         Auth::logoutOtherDevices($data['current_password']);
+        $request->user()->update(['password' => $data['password']]);
         $request->session()->regenerate();
         $request->session()->regenerateToken();
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'csrf_token' => $request->session()->token()]);
     }
 
     public function inventoryTemplate(Request $request): BinaryFileResponse
@@ -245,6 +245,12 @@ class ApiController extends Controller
 
     public function modelHealth(Request $request): JsonResponse
     {
+        if (! $this->hasForecastData()) {
+            return response()->json([
+                'has_data' => false, 'latest' => null, 'history' => [],
+                'message' => 'В филиале пока нет товаров и истории продаж. Загрузите Excel на странице склада.',
+            ]);
+        }
         $latest = $this->modelHealth->latest();
         if ($request->boolean('refresh') || $latest === null) {
             $plan = $this->ml->planning();
@@ -347,6 +353,9 @@ class ApiController extends Controller
 
     public function aiBriefing(): JsonResponse
     {
+        if (! $this->hasForecastData()) {
+            return response()->json(['briefing' => 'В филиале пока нет истории продаж. Загрузите Excel на странице склада, чтобы рассчитать прогноз и закупки.']);
+        }
         $critical = WarehouseStock::where('branch_id', $this->branches->id())->where('current_quantity', '<', 50)->count();
         $message = "Контур SAFE активен. {$critical} товаров в зоне риска. ";
         $message .= now()->month === 3
@@ -380,6 +389,9 @@ class ApiController extends Controller
             if ($quantity < 1) {
                 continue;
             }
+            $pack = max(1, (int) ($action['planning']['pack_size'] ?? 1));
+            $minimum = max(1, (int) ($action['planning']['minimum_order_quantity'] ?? 1));
+            abort_if($quantity < $minimum || $quantity % $pack !== 0, 422, 'Количество нарушает минимальную партию или кратность упаковки.');
             $items[] = [
                 ...$action,
                 'quantity' => $quantity,
@@ -450,7 +462,7 @@ class ApiController extends Controller
         abort_unless(DB::table('branch_products')->where('branch_id', $this->branches->id())->where('product_id', $data['product_id'])->exists(), 422, 'Товар не принадлежит выбранному филиалу.');
         WarehouseStock::updateOrCreate(
             ['branch_id' => $this->branches->id(), 'product_id' => $data['product_id']],
-            ['current_quantity' => $data['quantity']],
+            ['current_quantity' => $data['quantity'], 'as_of_date' => now()->toDateString()],
         );
 
         return response()->json(['success' => true]);
@@ -477,6 +489,8 @@ class ApiController extends Controller
             'formats' => ['sometimes', 'array', 'list', 'min:1', 'max:2'],
             'formats.*' => ['required', 'string', 'distinct', 'in:pdf,pptx'],
         ]);
+
+        abort_unless($this->hasForecastData(), 422, 'Для отчёта нужны товары и история продаж. Загрузите Excel на странице склада.');
 
         return $this->mlResponse($this->ml->generateReport(
             $data['type'] ?? 'standard',
@@ -526,6 +540,12 @@ class ApiController extends Controller
 
     private function enrichedPurchasePlan(): array
     {
+        if (! $this->hasForecastData()) {
+            return [
+                'success' => true, 'has_data' => false, 'actions' => [],
+                'message' => 'В филиале пока нет товаров и истории продаж. Загрузите Excel на странице склада.',
+            ];
+        }
         $plan = $this->ml->planning();
         if (! isset($plan['actions']) || ! is_array($plan['actions'])) {
             return $plan;
@@ -541,6 +561,12 @@ class ApiController extends Controller
         }, $plan['actions']);
 
         return $plan;
+    }
+
+    private function hasForecastData(): bool
+    {
+        return DB::table('branch_products')->where('branch_id', $this->branches->id())->where('active', true)->exists()
+            && DB::table('sales_history')->where('branch_id', $this->branches->id())->exists();
     }
 
     private function branchProducts(): Collection

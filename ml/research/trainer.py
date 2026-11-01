@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .metrics import interval_coverage, point_metrics, quantiles_are_ordered, segment_metrics
-from .models import build_model, pinball_loss, require_torch
+from .models import DEFAULT_PARAMETERIZATION, build_model, model_loss, require_torch
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class TrainingConfig:
     patience: int = 10
     learning_rate: float = 0.001
     seed: int = 42
+    quantile_parameterization: str = DEFAULT_PARAMETERIZATION
 
 
 def _loader(values, batch_size: int, shuffle: bool, seed: int = 42):
@@ -38,7 +39,7 @@ def _loss(model, loader, device) -> float:
     total, batches = 0.0, 0
     with torch.no_grad():
         for x, y in loader:
-            total += float(pinball_loss(model(x.to(device)), y.to(device)).item())
+            total += float(model_loss(model, x.to(device), y.to(device)).item())
             batches += 1
     return total / max(batches, 1)
 
@@ -48,7 +49,8 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model = build_model(name, train[0].shape[-1], config.history_days, config.horizon_days, config.hidden_size).to(device)
+    model = build_model(name, train[0].shape[-1], config.history_days, config.horizon_days, config.hidden_size,
+                        config.quantile_parameterization).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     train_loader = _loader(train, config.batch_size, True, config.seed)
     validation_loader = _loader(validation, config.batch_size, False, config.seed)
@@ -61,7 +63,7 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
         train_total, train_batches = 0.0, 0
         for x, y in train_loader:
             optimizer.zero_grad()
-            loss = pinball_loss(model(x.to(device)), y.to(device))
+            loss = model_loss(model, x.to(device), y.to(device))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -86,7 +88,7 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
     output_dir.mkdir(parents=True, exist_ok=True)
     weights = output_dir / f"{name}.pt"
     torch.save({"state_dict": model.state_dict(), "config": asdict(config), "feature_count": train[0].shape[-1],
-                "model": name, "quantile_parameterization": "softplus_increments_v2"}, weights)
+                "model": name, "quantile_parameterization": config.quantile_parameterization}, weights)
     return {
         "model": name,
         "epochs": epochs,
@@ -96,6 +98,11 @@ def train_model(name: str, train, validation, output_dir: Path, config: Training
         "device": str(device),
         "weights": weights.name,
         "loss_history": history,
+        "quantile_parameterization": config.quantile_parameterization,
+        "loss": "zero-inflated-lognormal-nll" if config.quantile_parameterization == DEFAULT_PARAMETERIZATION else "pinball",
+        "checkpoint_selection": "minimum validation loss",
+        "best_epoch": min(history, key=lambda row: row["validation_loss"])["epoch"],
+        "budget_exhausted": epochs == config.max_epochs and stale_epochs < config.patience,
     }
 
 

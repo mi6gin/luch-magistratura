@@ -199,18 +199,20 @@ def _aggregate(results: list[dict]) -> list[dict]:
             "parameter_count": int(folds[-1].get("parameter_count", 0)),
             "folds_completed": len(folds),
         }
+        if any("best_epoch" in fold for fold in folds):
+            aggregate["training_diagnostics"] = {
+                "best_epoch_by_fold": [fold.get("best_epoch") for fold in folds],
+                "budget_exhausted_folds": sum(bool(fold.get("budget_exhausted")) for fold in folds),
+                "checkpoint_selection": "minimum validation loss",
+            }
         preview = folds[-1]["metrics"].get("forecast_preview")
         if preview:
             aggregate["forecast_preview"] = preview
         route_names = sorted({segment for fold in folds for segment in fold.get("routes", {})})
         if route_names:
-            aggregate["routes"] = {
-                segment: max(
-                    {fold["routes"][segment] for fold in folds if segment in fold.get("routes", {})},
-                    key=lambda candidate: sum(fold.get("routes", {}).get(segment) == candidate for fold in folds),
-                )
-                for segment in route_names
-            }
+            # Deploy the latest fitted policy, never a vote using later folds to
+            # rewrite the policy evaluated on an earlier test window.
+            aggregate["routes"] = dict(folds[-1]["routes"])
         aggregated.append(aggregate)
     return aggregated
 
@@ -274,6 +276,14 @@ def run_experiment(
             "results": current_results,
         })
     results = _aggregate(fold_results)
+    if evaluation_split == "test" and manifest.get("dataset") == "Local Rayventory inventory":
+        from .runtime_validation import validate_runtime
+        frame = pd.read_csv(data_path, parse_dates=["date"], dtype={"id": str})
+        for result in results:
+            if "routes" in result:
+                result["runtime_validation"] = validate_runtime(
+                    frame, result["routes"], fold_documents[-1]["evaluation_start"], fold_documents[-1]["evaluation_end"],
+                )
     for result in results:
         result["metrics"]["evaluation_split"] = evaluation_split
         result["metrics"]["evaluation_windows"] = sum(

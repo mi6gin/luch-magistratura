@@ -67,6 +67,7 @@ def inventory(scenario_history=False):
             "id": 1, "sku": "SKU-1", "name": "Test", "category": "Test",
             "lead_time": 7, "unit_price": 100, "current_quantity": 10,
             "in_transit_quantity": 0,
+            "stock_as_of": pd.Timestamp.now().normalize(),
         }]), "transit": pd.DataFrame(), "data_as_of": dates[-1].date().isoformat(), "warnings": [],
     }
 
@@ -128,7 +129,8 @@ class RuntimeIntegrationTest(unittest.TestCase):
         self.assertEqual(forecast["stock"][1], 0)
         self.assertEqual(forecast["stock"][14], 990)
         self.assertEqual(_stockout_date(forecast, 10), forecast["dates"][1])
-        self.assertEqual(action["order_quantity"], 60)
+        self.assertEqual(action["order_quantity"], 10)
+        self.assertEqual(action["planning"]["expedite_quantity"], 60)
         self.assertEqual(action["in_transit_within_lead_time"], 0)
         self.assertIsNotNone(action["stockout_date"])
 

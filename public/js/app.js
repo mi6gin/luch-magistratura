@@ -2,7 +2,7 @@
     const root = document.documentElement;
     const page = document.body.dataset.page;
     let activeBranchId = Number(localStorage.getItem('rayventory-branch-id')) || null;
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    let csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const branchStorageKey = name => `rayventory-branch-${activeBranchId || 'default'}-${name}`;
     const savedTheme = localStorage.getItem('rayventory-theme')
         || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -315,7 +315,7 @@
             <td>${Number(item.on_hand).toLocaleString('ru-RU')}</td>
             <td>${Number(item.in_transit).toLocaleString('ru-RU')}</td>
             <td>${Number(item.days_cover).toLocaleString('ru-RU')} дн.</td>
-            <td class="stock-value">${basketQuantity.toLocaleString('ru-RU')}<small class="table-subline">${limited ? `из ${Number(item.order_quantity).toLocaleString('ru-RU')}` : 'рекомендация'}</small></td>
+            <td class="stock-value">${basketQuantity.toLocaleString('ru-RU')}<small class="table-subline">${escapeHtml(item.action || '')}${limited ? ` · из ${Number(item.order_quantity).toLocaleString('ru-RU')}` : ''}</small></td>
             <td>${Math.round(basketQuantity * Number(item.unit_price)).toLocaleString('ru-RU')} ₸</td>
             <td>${risk}</td>
             <td><span class="confidence ${escapeHtml(quality)}">${confidence}</span></td>
@@ -333,7 +333,11 @@
             } else if (price <= 0) {
                 item.basket_quantity = recommended;
             } else {
-                item.basket_quantity = Math.min(recommended, Math.floor(Math.max(balance, 0) / price));
+                const pack = Math.max(1, Number(item.planning?.pack_size || 1));
+                const minimum = Math.max(1, Number(item.planning?.minimum_order_quantity || 1));
+                const affordable = Math.floor(Math.max(balance, 0) / (price * pack)) * pack;
+                const quantity = Math.min(recommended, affordable);
+                item.basket_quantity = quantity >= minimum ? quantity : 0;
                 balance -= item.basket_quantity * price;
             }
         });
@@ -445,16 +449,18 @@
         const reasons = Array.isArray(item.reasons) ? item.reasons : [];
         const itemWarnings = normalizeWarnings(item.warnings);
         document.querySelector('#explain-content').innerHTML = `
-            <p class="explain-summary">Мы берём прогноз спроса на весь срок поставки с учётом выбранного уровня риска, затем вычитаем доступный остаток и уже заказанный товар. Отрицательный результат считается нулём.</p>
+            <p class="explain-summary">План учитывает период покрытия и резерв в днях, даты поступлений, минимальную партию и упаковку. Для заказа нужны актуальные остатки и разрешённое пополнение. Сценарные границы не гарантируют уровень сервиса.</p>
             ${reasons.length ? `<div class="explain-reasons"><b>Почему система рекомендует это действие</b><ol>${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ol></div>` : ''}
             <div class="explain-equation">
-                <article><small>Спрос на срок поставки</small><b>${Number(item.lead_time_demand).toLocaleString('ru-RU')}</b></article>
+                <article><small>Спрос на период покрытия</small><b>${Number(item.planning?.coverage_demand ?? item.lead_time_demand).toLocaleString('ru-RU')}</b></article>
                 <span>−</span><article><small>Остаток</small><b>${Number(item.on_hand).toLocaleString('ru-RU')}</b></article>
-                <span>−</span><article><small>В пути</small><b>${Number(item.in_transit).toLocaleString('ru-RU')}</b></article>
-                <span>=</span><article class="result"><small>К заказу</small><b>${Number(item.order_quantity).toLocaleString('ru-RU')}</b></article>
+                <span>·</span><article><small>Действие</small><b>${escapeHtml(item.action || '')}</b></article>
+                <span>→</span><article class="result"><small>Заказ с ограничениями</small><b>${Number(item.order_quantity).toLocaleString('ru-RU')}</b></article>
             </div>
             <dl class="explain-list">
                 <div><dt>Срок поставки</dt><dd>${item.lead_time_days} дней</dd></div>
+                <div><dt>Период покрытия</dt><dd>${Number(item.planning?.coverage_days || item.lead_time_days)} дней</dd></div>
+                <div><dt>Дата остатков</dt><dd>${escapeHtml(item.quality?.stock_as_of || 'неизвестна')}</dd></div>
                 <div><dt>Медианный спрос</dt><dd>${Number(item.median_lead_time_demand).toLocaleString('ru-RU')}</dd></div>
                 <div><dt>Страховая поправка</dt><dd>${Number(item.safety_stock).toLocaleString('ru-RU')}</dd></div>
                 <div><dt>Лучший день заказа</dt><dd>${escapeHtml(item.best_order_date || 'заказ пока не требуется')}</dd></div>
@@ -473,6 +479,19 @@
         try {
             const data = await api('purchase-plan');
             purchaseActions = data.actions || [];
+            if (data.has_data === false) {
+                renderPurchaseBasket();
+                ['purchase-units', 'purchase-value', 'purchase-risk', 'purchase-quality'].forEach(id => {
+                    document.getElementById(id).textContent = 'н/д';
+                });
+                document.querySelector('#purchase-quality-note').textContent = 'нужны исходные данные';
+                document.querySelector('#purchase-data-date').textContent = 'данные не загружены';
+                document.querySelector('#quality-grid').innerHTML = '';
+                const warningBox = document.querySelector('#purchase-warnings');
+                warningBox.textContent = data.message;
+                warningBox.classList.remove('hidden');
+                return;
+            }
             document.querySelector('#purchase-units').textContent = Number(data.portfolio.recommended_order_units).toLocaleString('ru-RU');
             document.querySelector('#purchase-value').textContent = `${Number(data.portfolio.recommended_order_value).toLocaleString('ru-RU')} ₸`;
             document.querySelector('#purchase-risk').textContent = `${data.portfolio.at_risk_skus} SKU`;
@@ -775,7 +794,16 @@
     async function loadResearchReport() {
         const data = await api('research-report');
         const report = data.report;
-        if (!report) return;
+        const charts = document.querySelectorAll('.research-chart-grid img');
+        if (!report) {
+            document.querySelector('#research-report-meta').textContent = 'Итоговое исследование для этого филиала ещё не подготовлено.';
+            document.querySelector('#research-scale-results').innerHTML = '<tr><td colspan="4">Нет результатов масштабирования.</td></tr>';
+            return;
+        }
+        charts.forEach(image => {
+            image.src = image.dataset.researchSrc;
+        });
+        document.querySelector('.research-chart-grid')?.classList.remove('hidden');
         document.querySelector('#research-report-meta').textContent = `${report.dataset} · ${report.rolling_folds} rolling-окна`;
         document.querySelector('#research-best-neural').textContent = report.best_neural ? `ЛУЧШАЯ НС · ${String(report.best_neural).toUpperCase()}` : 'НЕЙРОСЕТИ НЕ ОЦЕНИВАЛИСЬ';
         document.querySelector('#research-verdict').textContent = report.conclusion;
@@ -836,6 +864,17 @@
         try {
             const data = await api(`model-health${refresh ? '?refresh=1' : ''}`);
             const item = data.latest;
+            if (!item) {
+                ['health-freshness', 'health-wape', 'health-bias', 'health-coverage'].forEach(id => {
+                    document.getElementById(id).textContent = 'н/д';
+                });
+                document.querySelector('#health-status').textContent = 'НЕТ ДАННЫХ';
+                document.querySelector('#health-freshness-note').textContent = 'история не загружена';
+                document.querySelector('#health-summary').textContent = data.message;
+                document.querySelector('#health-details').innerHTML = '';
+                document.querySelector('#model-health-history').innerHTML = '<tr><td colspan="6">История пока пуста</td></tr>';
+                return;
+            }
             const metrics = item.metrics || {};
             const evaluable = Boolean(item.evaluable);
             const freshnessLabels = { fresh: 'АКТУАЛЬНО', warning: 'УСТАРЕВАЮТ', critical: 'УСТАРЕЛИ' };
@@ -1031,6 +1070,13 @@
     };
 
     async function runSimulationAsync() {
+        if (!document.querySelector('#sim-product')?.value) {
+            document.querySelector('#simulation-status').textContent = 'В филиале пока нет товаров. Загрузите Excel на странице склада.';
+            document.querySelector('#run-simulation').disabled = true;
+            document.querySelector('#chart-empty b').textContent = 'Для сценария нужны исходные данные';
+            document.querySelector('#chart-empty small').textContent = 'Добавьте товары и историю продаж на странице склада.';
+            return;
+        }
         const button = document.querySelector('#run-simulation');
         const panel = document.querySelector('.chart-panel');
         const status = document.querySelector('#simulation-status');
@@ -1459,11 +1505,18 @@
     document.querySelector('#password-change-form')?.addEventListener('submit', async event => {
         event.preventDefault();
         try {
-            await api('account/password', { method: 'POST', body: JSON.stringify({
+            const result = await api('account/password', { method: 'POST', body: JSON.stringify({
                 current_password: document.querySelector('#current-password').value,
                 password: document.querySelector('#new-password').value,
                 password_confirmation: document.querySelector('#new-password-confirmation').value,
             }) });
+            if (result.csrf_token) {
+                csrfToken = result.csrf_token;
+                document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrfToken);
+                document.querySelectorAll('input[name="_token"]').forEach(input => {
+                    input.value = csrfToken;
+                });
+            }
             event.target.reset();
             toast('Пароль обновлён');
         } catch (error) { toast(error.message, 'error'); }
