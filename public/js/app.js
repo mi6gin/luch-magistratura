@@ -1513,6 +1513,9 @@
             if (result.csrf_token) {
                 csrfToken = result.csrf_token;
                 document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', csrfToken);
+                document.querySelectorAll('input[name="_token"]').forEach(input => {
+                    input.value = csrfToken;
+                });
             }
             event.target.reset();
             toast('Пароль обновлён');
