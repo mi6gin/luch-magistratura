@@ -1,4 +1,4 @@
-FROM php:8.5-cli
+FROM php:8.6-cli
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git unzip libonig-dev libpng-dev libsqlite3-dev libzip-dev python3 python3-pip \
